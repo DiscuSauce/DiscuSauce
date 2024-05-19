@@ -1,160 +1,272 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[cod]
-*$py.class
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g
+import sqlite3
+from werkzeug.security import generate_password_hash, check_password_hash
 
-# C extensions
-*.so
+app = Flask(__name__)
+app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
+def init_db():
+    with sqlite3.connect('app.db') as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS users
+                        (id INTEGER PRIMARY KEY, 
+                         username TEXT UNIQUE, 
+                         password TEXT)''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS posts
+                        (id INTEGER PRIMARY KEY, 
+                         user_id INTEGER, 
+                         content TEXT, 
+                         upvotes INTEGER DEFAULT 0, 
+                         downvotes INTEGER DEFAULT 0, 
+                         FOREIGN KEY(user_id) REFERENCES users(id))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS comments
+                        (id INTEGER PRIMARY KEY, 
+                         post_id INTEGER, 
+                         user_id INTEGER, 
+                         content TEXT, 
+                         FOREIGN KEY(post_id) REFERENCES posts(id), 
+                         FOREIGN KEY(user_id) REFERENCES users(id))''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS votes
+                        (id INTEGER PRIMARY KEY, 
+                         post_id INTEGER, 
+                         user_id INTEGER, 
+                         vote INTEGER, 
+                         UNIQUE(post_id, user_id), 
+                         FOREIGN KEY(post_id) REFERENCES posts(id), 
+                         FOREIGN KEY(user_id) REFERENCES users(id))''')
+    conn.close()
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+@app.before_request
+def before_request():
+    g.db = sqlite3.connect('app.db')
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+@app.teardown_request
+def teardown_request(exception):
+    if hasattr(g, 'db'):
+        g.db.close()
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py,cover
-.hypothesis/
-.pytest_cache/
-cover/
+@app.route('/')
+def index():
+    if 'username' in session:
+        posts = g.db.execute('''
+            SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes
+            FROM posts JOIN users ON posts.user_id = users.id
+            ORDER BY (posts.upvotes - posts.downvotes) DESC
+        ''').fetchall()
+        user_votes = {row[0]: row[1] for row in g.db.execute('SELECT post_id, vote FROM votes WHERE user_id = ?', (session['user_id'],)).fetchall()}
+        return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
+    return redirect(url_for('login'))
 
-# Translations
-*.mo
-*.pot
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        user = g.db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        if user and check_password_hash(user[2], password):
+            session['username'] = username
+            session['user_id'] = user[0]
+            if username == 'admin':
+                session['admin'] = True
+            return redirect(url_for('index'))
+        flash('Invalid credentials', 'error')
+    return render_template('login.html')
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        username = request.form['username']
+        password = request.form['password']
+        if len(username) < 3:
+            flash('Username must be at least 3 characters long', 'error')
+        elif len(password) < 8:
+            flash('Password must be at least 8 characters long', 'error')
+        else:
+            hashed_password = generate_password_hash(password)
+            try:
+                g.db.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashed_password))
+                g.db.commit()
+                session['username'] = username
+                user = g.db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+                session['user_id'] = user[0]
+                if username == 'admin':
+                    session['admin'] = True
+                return redirect(url_for('index'))
+            except sqlite3.IntegrityError:
+                flash('Username already exists', 'error')
+    return render_template('register.html')
 
-# Flask stuff:
-instance/
-.webassets-cache
+@app.route('/profile', methods=['GET', 'POST'])
+def profile():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    if request.method == 'POST':
+        new_username = request.form['new_username']
+        new_password = request.form['new_password']
+        confirm_password = request.form['confirm_password']
+        if new_username and len(new_username) < 3:
+            flash('Username must be at least 3 characters long', 'error')
+        elif new_username:
+            try:
+                g.db.execute('UPDATE users SET username = ? WHERE id = ?', (new_username, user_id))
+                g.db.commit()
+                session['username'] = new_username
+                flash('Username updated successfully', 'success')
+            except sqlite3.IntegrityError:
+                flash('Username already exists', 'error')
+        if new_password:
+            if len(new_password) < 8:
+                flash('Password must be at least 8 characters long', 'error')
+            elif new_password != confirm_password:
+                flash('Passwords do not match', 'error')
+            else:
+                hashed_password = generate_password_hash(new_password)
+                g.db.execute('UPDATE users SET password = ? WHERE id = ?', (hashed_password, user_id))
+                g.db.commit()
+                flash('Password updated successfully', 'success')
+    user_posts = g.db.execute('SELECT id, content FROM posts WHERE user_id = ?', (user_id,)).fetchall()
+    return render_template('profile.html', posts=user_posts)
 
-# Scrapy stuff:
-.scrapy
+@app.route('/create_post', methods=['GET', 'POST'])
+def create_post():
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        content = request.form['content']
+        if len(content.split()) > 64:
+            flash('Post content exceeds 64 words limit', 'error')
+        else:
+            user_id = session['user_id']
+            g.db.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)', (user_id, content))
+            g.db.commit()
+            flash('Post created successfully', 'success')
+            return redirect(url_for('index'))
+    return render_template('create_post.html')
 
-# Sphinx documentation
-docs/_build/
+@app.route('/delete_post/<int:post_id>')
+def delete_post(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    post = g.db.execute('SELECT * FROM posts WHERE id = ? AND user_id = ?', (post_id, user_id)).fetchone()
+    if post:
+        g.db.execute('DELETE FROM posts WHERE id = ?', (post_id,))
+        g.db.execute('DELETE FROM comments WHERE post_id = ?', (post_id,))
+        g.db.execute('DELETE FROM votes WHERE post_id = ?', (post_id,))
+        g.db.commit()
+        flash('Post deleted successfully', 'success')
+    return redirect(url_for('profile'))
 
-# PyBuilder
-.pybuilder/
-target/
+@app.route('/vote/<int:post_id>/<int:vote>')
+def vote(post_id, vote):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    existing_vote = g.db.execute('SELECT * FROM votes WHERE post_id = ? AND user_id = ?', (post_id, user_id)).fetchone()
+    if existing_vote:
+        if existing_vote[3] == vote:
+            g.db.execute('DELETE FROM votes WHERE post_id = ? AND user_id = ?', (post_id, user_id))
+            if vote == 1:
+                g.db.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = ?', (post_id,))
+            else:
+                g.db.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = ?', (post_id,))
+        else:
+            g.db.execute('UPDATE votes SET vote = ? WHERE post_id = ? AND user_id = ?', (vote, post_id, user_id))
+            if vote == 1:
+                g.db.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = ?', (post_id,))
+            else:
+                g.db.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = ?', (post_id,))
+    else:
+        g.db.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (?, ?, ?)', (post_id, user_id, vote))
+        if vote == 1:
+            g.db.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = ?', (post_id,))
+        else:
+            g.db.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = ?', (post_id,))
+    g.db.commit()
+    return redirect(url_for('index'))
 
-# Jupyter Notebook
-.ipynb_checkpoints
+@app.route('/post/<int:post_id>', methods=['GET', 'POST'])
+def view_post(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    if request.method == 'POST':
+        comment_content = request.form['comment']
+        if comment_content:
+            user_id = session['user_id']
+            g.db.execute('INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)', (post_id, user_id, comment_content))
+            g.db.commit()
+            flash('Comment added successfully', 'success')
+    post = g.db.execute('''
+        SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes 
+        FROM posts 
+        JOIN users ON posts.user_id = users.id 
+        WHERE posts.id = ?
+    ''', (post_id,)).fetchone()
+    comments = g.db.execute('''
+        SELECT comments.id, users.username, comments.content 
+        FROM comments 
+        JOIN users ON comments.user_id = users.id 
+        WHERE comments.post_id = ?
+    ''', (post_id,)).fetchall()
+    user_votes = {row[0]: row[1] for row in g.db.execute('SELECT post_id, vote FROM votes WHERE user_id = ?', (session['user_id'],)).fetchall()}
+    return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
 
-# IPython
-profile_default/
-ipython_config.py
+@app.route('/delete_comment/<int:comment_id>')
+def delete_comment(comment_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    comment = g.db.execute('SELECT * FROM comments WHERE id = ? AND user_id = ?', (comment_id, user_id)).fetchone()
+    if comment:
+        g.db.execute('DELETE FROM comments WHERE id = ?', (comment_id,))
+        g.db.commit()
+        flash('Comment deleted successfully', 'success')
+    return redirect(url_for('view_post', post_id=comment[1]))
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+@app.route('/logout')
+def logout():
+    session.pop('username', None)
+    session.pop('user_id', None)
+    session.pop('admin', None)
+    return redirect(url_for('login'))
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+@app.route('/create_comment/<int:post_id>', methods=['POST'])
+def create_comment(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    content = request.form['comment']
+    user_id = session['user_id']
+    g.db.execute('INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)', (post_id, user_id, content))
+    g.db.commit()
+    flash('Comment added successfully', 'success')
+    return redirect(url_for('view_post', post_id=post_id))
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
+@app.route('/admin')
+def admin():
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    users = g.db.execute('SELECT id, username FROM users').fetchall()
+    posts = g.db.execute('SELECT id, content FROM posts').fetchall()
+    return render_template('admin.html', users=users, posts=posts)
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#pdm.lock
-#   pdm stores project-wide configurations in .pdm.toml, but it is recommended to not include it
-#   in version control.
-#   https://pdm.fming.dev/#use-with-ide
-.pdm.toml
+@app.route('/delete_user/<int:user_id>')
+def delete_user(user_id):
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    g.db.execute('DELETE FROM users WHERE id = ?', (user_id,))
+    g.db.commit()
+    flash('User deleted successfully', 'success')
+    return redirect(url_for('admin'))
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
+@app.route('/admin_delete_post/<int:post_id>')
+def admin_delete_post(post_id):
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    g.db.execute('DELETE FROM posts WHERE id = ?', (post_id,))
+    g.db.commit()
+    flash('Post deleted successfully', 'success')
+    return redirect(url_for('admin'))
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath parsed files
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True)
