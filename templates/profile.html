@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<h2>Profile</h2>
+<form method="post">
+    <label for="new_username">New Username</label>
+    <input type="text" id="new_username" name="new_username" value="{{ session['username'] }}">
+
+    <label for="new_password">New Password</label>
+    <div class="password-container">
+        <input type="password" id="new_password" name="new_password">
+        <i class="far fa-eye" onclick="togglePasswordVisibility('new_password')"></i>
+    </div>
+
+    <label for="confirm_password">Confirm New Password</label>
+    <div class="password-container">
+        <input type="password" id="confirm_password" name="confirm_password">
+        <i class="far fa-eye" onclick="togglePasswordVisibility('confirm_password')"></i>
+    </div>
+
+    <button type="submit">Update Profile</button>
+</form>
+
+<h3>Your Posts</h3>
+<div class="post-list">
+    {% for post in posts %}
+    <div class="post">
+        <p>{{ post[1] }}</p>
+        <a href="{{ url_for('view_post', post_id=post[0]) }}">Comments</a>
+        <a href="{{ url_for('delete_post', post_id=post[0]) }}">Delete</a>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function togglePasswordVisibility(fieldId) {
+        var field = document.getElementById(fieldId);
+        var icon = field.nextElementSibling;
+        if (field.type === "password") {
+            field.type = "text";
+            icon.classList.remove('fa-eye');
+            icon.classList.add('fa-eye-slash');
+        } else {
+            field.type = "password";
+            icon.classList.remove('fa-eye-slash');
+            icon.classList.add('fa-eye');
+        }
+    }
+</script>
+{% endblock %}
