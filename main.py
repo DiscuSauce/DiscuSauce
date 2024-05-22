@@ -4,11 +4,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
-DATABASE_URI = 'sqlite:///app.db'
 
 def init_db():
     try:
-        with sqlite3.connect(DATABASE_URI) as conn:
+        with sqlite3.connect('app.db') as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS users
                             (id INTEGER PRIMARY KEY, 
                              username TEXT UNIQUE, 
@@ -43,7 +42,7 @@ init_db()
 
 @app.before_request
 def before_request():
-    g.db = sqlite3.connect(DATABASE_URI)
+    g.db = sqlite3.connect('app.db')
 
 @app.teardown_request
 def teardown_request(exception):
