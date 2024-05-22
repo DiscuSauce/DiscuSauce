@@ -1,39 +1,44 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 import sqlite3
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
 def init_db():
-    with sqlite3.connect('app.db') as conn:
-        conn.execute('''CREATE TABLE IF NOT EXISTS users
-                        (id INTEGER PRIMARY KEY, 
-                         username TEXT UNIQUE, 
-                         password TEXT)''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS posts
-                        (id INTEGER PRIMARY KEY, 
-                         user_id INTEGER, 
-                         content TEXT, 
-                         upvotes INTEGER DEFAULT 0, 
-                         downvotes INTEGER DEFAULT 0, 
-                         FOREIGN KEY(user_id) REFERENCES users(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS comments
-                        (id INTEGER PRIMARY KEY, 
-                         post_id INTEGER, 
-                         user_id INTEGER, 
-                         content TEXT, 
-                         FOREIGN KEY(post_id) REFERENCES posts(id), 
-                         FOREIGN KEY(user_id) REFERENCES users(id))''')
-        conn.execute('''CREATE TABLE IF NOT EXISTS votes
-                        (id INTEGER PRIMARY KEY, 
-                         post_id INTEGER, 
-                         user_id INTEGER, 
-                         vote INTEGER, 
-                         UNIQUE(post_id, user_id), 
-                         FOREIGN KEY(post_id) REFERENCES posts(id), 
-                         FOREIGN KEY(user_id) REFERENCES users(id))''')
-    conn.close()
+    try:
+        with sqlite3.connect('app.db') as conn:
+            conn.execute('''CREATE TABLE IF NOT EXISTS users
+                            (id INTEGER PRIMARY KEY, 
+                             username TEXT UNIQUE, 
+                             password TEXT)''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS posts
+                            (id INTEGER PRIMARY KEY, 
+                             user_id INTEGER, 
+                             content TEXT, 
+                             upvotes INTEGER DEFAULT 0, 
+                             downvotes INTEGER DEFAULT 0, 
+                             FOREIGN KEY(user_id) REFERENCES users(id))''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS comments
+                            (id INTEGER PRIMARY KEY, 
+                             post_id INTEGER, 
+                             user_id INTEGER, 
+                             content TEXT, 
+                             FOREIGN KEY(post_id) REFERENCES posts(id), 
+                             FOREIGN KEY(user_id) REFERENCES users(id))''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS votes
+                            (id INTEGER PRIMARY KEY, 
+                             post_id INTEGER, 
+                             user_id INTEGER, 
+                             vote INTEGER, 
+                             UNIQUE(post_id, user_id), 
+                             FOREIGN KEY(post_id) REFERENCES posts(id), 
+                             FOREIGN KEY(user_id) REFERENCES users(id))''')
+        print("Tables created successfully.")
+    except sqlite3.Error as e:
+        print(f"Error creating tables: {e}")
+
+init_db()
 
 @app.before_request
 def before_request():
@@ -267,6 +272,10 @@ def admin_delete_post(post_id):
     flash('Post deleted successfully', 'success')
     return redirect(url_for('admin'))
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    print(f"Error: {e}")
+    return str(e), 500
+
 if __name__ == '__main__':
-    init_db()
     app.run(debug=True, host='0.0.0.0')
