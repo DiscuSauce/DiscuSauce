@@ -1,9 +1,15 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
+from os import getenv
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
+app.secret_key = os.getenv('SECRET_KEY')
 
 def init_db():
     with sqlite3.connect('app.db') as conn:
