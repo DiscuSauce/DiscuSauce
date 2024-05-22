@@ -1,18 +1,9 @@
-import logging
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 import sqlite3
 from werkzeug.security import generate_password_hash, check_password_hash
-from os import getenv
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY')
-
-# Настройка логирования
-logging.basicConfig(level=logging.DEBUG)
+app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
 def init_db():
     with sqlite3.connect('app.db') as conn:
@@ -46,35 +37,24 @@ def init_db():
 
 @app.before_request
 def before_request():
-    try:
-        g.db = sqlite3.connect('app.db')
-    except sqlite3.Error as e:
-        app.logger.error(f"Database connection error: {e}")
-        raise
+    g.db = sqlite3.connect('app.db')
 
 @app.teardown_request
 def teardown_request(exception):
     if hasattr(g, 'db'):
-        try:
-            g.db.close()
-        except sqlite3.Error as e:
-            app.logger.error(f"Database close error: {e}")
+        g.db.close()
 
 @app.route('/')
 def index():
-    try:
-        if 'username' in session:
-            posts = g.db.execute('''
-                SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes
-                FROM posts JOIN users ON posts.user_id = users.id
-                ORDER BY (posts.upvotes - posts.downvotes) DESC
-            ''').fetchall()
-            user_votes = {row[0]: row[1] for row in g.db.execute('SELECT post_id, vote FROM votes WHERE user_id = ?', (session['user_id'],)).fetchall()}
-            return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
-        return redirect(url_for('login'))
-    except Exception as e:
-        app.logger.error(f"Error in index route: {e}")
-        return "Internal Server Error", 500
+    if 'username' in session:
+        posts = g.db.execute('''
+            SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes
+            FROM posts JOIN users ON posts.user_id = users.id
+            ORDER BY (posts.upvotes - posts.downvotes) DESC
+        ''').fetchall()
+        user_votes = {row[0]: row[1] for row in g.db.execute('SELECT post_id, vote FROM votes WHERE user_id = ?', (session['user_id'],)).fetchall()}
+        return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
+    return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
