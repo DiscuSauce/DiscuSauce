@@ -1,5 +1,4 @@
-Flask
-gunicorn
-Werkzeug
-SQLAlchemy
-psycopg2
+Flask==2.0.3
+Flask-SQLAlchemy==2.5.1
+gunicorn==20.1.0
+Werkzeug==2.0.3
