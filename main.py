@@ -1,27 +1,49 @@
-import os
-from flask import Flask
-from flask_sqlalchemy import SQLAlchemy
+import sqlite3
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(app.root_path, 'app.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
+DATABASE_URI = 'sqlite:///app.db'
 
-db = SQLAlchemy(app)
+def init_db():
+    try:
+        with sqlite3.connect(DATABASE_URI) as conn:
+            conn.execute('''CREATE TABLE IF NOT EXISTS users
+                            (id INTEGER PRIMARY KEY, 
+                             username TEXT UNIQUE, 
+                             password TEXT)''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS posts
+                            (id INTEGER PRIMARY KEY, 
+                             user_id INTEGER, 
+                             content TEXT, 
+                             upvotes INTEGER DEFAULT 0, 
+                             downvotes INTEGER DEFAULT 0, 
+                             FOREIGN KEY(user_id) REFERENCES users(id))''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS comments
+                            (id INTEGER PRIMARY KEY, 
+                             post_id INTEGER, 
+                             user_id INTEGER, 
+                             content TEXT, 
+                             FOREIGN KEY(post_id) REFERENCES posts(id), 
+                             FOREIGN KEY(user_id) REFERENCES users(id))''')
+            conn.execute('''CREATE TABLE IF NOT EXISTS votes
+                            (id INTEGER PRIMARY KEY, 
+                             post_id INTEGER, 
+                             user_id INTEGER, 
+                             vote INTEGER, 
+                             UNIQUE(post_id, user_id), 
+                             FOREIGN KEY(post_id) REFERENCES posts(id), 
+                             FOREIGN KEY(user_id) REFERENCES users(id))''')
+        print("Tables created successfully.")
+    except sqlite3.Error as e:
+        print(f"Error creating tables: {e}")
 
-class User(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    password = db.Column(db.String(120), nullable=False)
-
-class Session(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    session_id = db.Column(db.String(255), unique=True)
-    data = db.Column(db.PickleType)
+init_db()
 
 @app.before_request
 def before_request():
-    g.db = sqlite3.connect('app.db')
+    g.db = sqlite3.connect(DATABASE_URI)
 
 @app.teardown_request
 def teardown_request(exception):
@@ -45,10 +67,10 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        user = User.query.filter_by(username=username).first()
-        if user and check_password_hash(user.password, password):
+        user = g.db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+        if user and check_password_hash(user[2], password):
             session['username'] = username
-            session['user_id'] = user.id
+            session['user_id'] = user[0]
             if username == 'admin':
                 session['admin'] = True
             return redirect(url_for('index'))
@@ -58,29 +80,25 @@ def login():
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username = request.form['username'].lower()  # Приводим имя пользователя к нижнему регистру
+        username = request.form['username']
         password = request.form['password']
         if len(username) < 3:
             flash('Username must be at least 3 characters long', 'error')
         elif len(password) < 8:
             flash('Password must be at least 8 characters long', 'error')
         else:
-            existing_user = User.query.filter_by(username=username).first()
-            if existing_user:
+            hashed_password = generate_password_hash(password)
+            try:
+                g.db.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashed_password))
+                g.db.commit()
+                session['username'] = username
+                user = g.db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+                session['user_id'] = user[0]
+                if username == 'admin':
+                    session['admin'] = True
+                return redirect(url_for('index'))
+            except sqlite3.IntegrityError:
                 flash('Username already exists', 'error')
-            else:
-                hashed_password = generate_password_hash(password)
-                try:
-                    new_user = User(username=username, password=hashed_password)
-                    db.session.add(new_user)
-                    db.session.commit()
-                    session['username'] = username
-                    session['user_id'] = new_user.id
-                    if username == 'admin':
-                        session['admin'] = True
-                    return redirect(url_for('index'))
-                except Exception as e:
-                    flash('An error occurred while registering user', 'error')
     return render_template('register.html')
 
 @app.route('/profile', methods=['GET', 'POST'])
