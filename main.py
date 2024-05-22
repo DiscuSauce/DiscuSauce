@@ -268,5 +268,6 @@ def admin_delete_post(post_id):
     return redirect(url_for('admin'))
 
 if __name__ == '__main__':
-    init_db()
+    with app.app_context():
+        init_db()
     app.run(debug=True)
