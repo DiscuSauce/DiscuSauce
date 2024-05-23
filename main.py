@@ -48,10 +48,9 @@ def index():
         posts = []
         for post_id in r.smembers('posts'):
             post = r.hgetall(f'post:{post_id}')
-            if post:
-                post['id'] = post_id
-                post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
-                posts.append(post)
+            post['id'] = post_id
+            post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
+            posts.append(post)
         posts.sort(key=lambda x: int(x['upvotes']) - int(x['downvotes']), reverse=True)
         user_votes = {post_id: r.hget(f'vote:{post_id}:{session["user_id"]}', 'vote') for post_id in r.smembers('posts')}
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
@@ -89,7 +88,7 @@ def register():
                 flash('Username already exists', 'error')
             else:
                 user_id = r.incr('user:id')
-                r.hset(f'user:{user_id}', mapping={'username': username, 'password': hashed_password})
+                r.hmset(f'user:{user_id}', {'username': username, 'password': hashed_password})
                 r.set(f'username:{username}', user_id)
                 session['username'] = username
                 session['user_id'] = user_id
@@ -142,9 +141,8 @@ def create_post():
         else:
             user_id = session['user_id']
             post_id = r.incr('post:id')  # Get a new post ID
-            r.hset(f'post:{post_id}', mapping={'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0})
-            r.sadd('posts', post_id)
-            r.sadd(f'user:{user_id}:posts', post_id)
+            r.hmset(f'post:{post_id}', {'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0})
+            r.lpush('posts', post_id)
             flash('Post created successfully', 'success')
             return redirect(url_for('index'))
     return render_template('create_post.html')
@@ -233,7 +231,7 @@ def create_comment(post_id):
     content = request.form['comment']
     user_id = session['user_id']
     comment_id = r.incr('comment:id')
-    r.hset(f'comment:{comment_id}', mapping={'post_id': post_id, 'user_id': user_id, 'content': content})
+    r.hmset(f'comment:{comment_id}', {'post_id': post_id, 'user_id': user_id, 'content': content})
     r.sadd(f'post:{post_id}:comments', comment_id)
     flash('Comment added successfully', 'success')
     return redirect(url_for('view_post', post_id=post_id))
