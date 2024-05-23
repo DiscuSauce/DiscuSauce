@@ -163,6 +163,7 @@ def profile():
 @app.route('/create_post', methods=['GET', 'POST'])
 def create_post():
     if 'username' not in session:
+        flash('You need to be logged in to create a post', 'error')
         return redirect(url_for('login'))
     if request.method == 'POST':
         content = request.form['content']
