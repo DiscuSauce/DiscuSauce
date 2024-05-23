@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
 import redis
+import os
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
@@ -237,4 +238,5 @@ def handle_exception(e):
     return str(e), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    port = int(os.environ.get('PORT', 5000))
+    app.run(debug=True, host='0.0.0.0', port=port)
