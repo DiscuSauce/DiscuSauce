@@ -1,5 +1,5 @@
 Flask
 gunicorn
-psycopg2-binary
 Werkzeug
 python-dotenv
+upstash-redis
