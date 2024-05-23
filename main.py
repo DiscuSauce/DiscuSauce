@@ -249,8 +249,9 @@ def admin():
 def delete_user(user_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
+    username = r.hget(f'user:{user_id}', 'username')
+    r.delete(f'username:{username}')
     r.delete(f'user:{user_id}')
-    r.delete(f'username:{r.hget(f'user:{user_id}', 'username')}')
     flash('User deleted successfully', 'success')
     return redirect(url_for('admin'))
 
