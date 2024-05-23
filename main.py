@@ -1,19 +1,21 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
-from upstash_redis import Redis
+import redis
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# Initialize Redis connection with your Upstash Redis URL and token directly in the code
-redis = Redis(
-    url='https://eu1-secure-albacore-38686.upstash.io',
-    token='AZceASQgNzcwYzNiYWUtYWVmZi00MjEwLTlhY2UtN2Y4NDUzZTI5ZGJiNjFlYzc4YmYwMDRhNDI1YThlZWIzNTU1NzM1NjQ2ZDc='
+# Initialize Redis connection
+r = redis.Redis(
+    host='eu1-secure-albacore-38686.upstash.io',
+    port=38686,
+    password='61ec78bf004a425a8eeb3555735646d7',
+    ssl=True
 )
 
 @app.before_request
 def before_request():
-    g.redis = redis
+    g.redis = r
 
 @app.route('/')
 def index():
