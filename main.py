@@ -102,9 +102,14 @@ def create_user(username, password):
     return g.cursor.lastrowid
 
 def create_post(user_id, content):
-    g.cursor.execute('INSERT INTO posts (user_id, content, upvotes, downvotes) VALUES (%s, %s, 0, 0)', (user_id, sanitize_input(content)))
-    g.db.commit()
-    return g.cursor.lastrowid
+    db = get_db_connection()
+    cursor = db.cursor()
+    cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
+    post_id = cursor.lastrowid
+    db.commit()
+    cursor.close()
+    db.close()
+    return post_id
 
 def flash_message(category, message):
     flash(message, category)
