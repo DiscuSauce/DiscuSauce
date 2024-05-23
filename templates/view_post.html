@@ -4,13 +4,13 @@
 
 {% block content %}
 <div class="post">
-    <h3>{{ post[2] }}</h3>
+    <h3>{{ post['content'] }}</h3>
     <div class="post-footer">
-        <span class="author">Posted by {{ post[1] }}</span>
+        <span class="author">Posted by {{ post['username'] }}</span>
         <span class="votes">
-            <a href="{{ url_for('vote', post_id=post[0], vote=1) }}"><i class="fas fa-arrow-up"></i></a>
-            <span>{{ post[3] - post[4] }}</span>
-            <a href="{{ url_for('vote', post_id=post[0], vote=-1) }}"><i class="fas fa-arrow-down"></i></a>
+            <a href="{{ url_for('vote', post_id=post['id'], vote=1) }}"><i class="fas fa-arrow-up"></i></a>
+            <span>{{ post['upvotes'] - post['downvotes'] }}</span>
+            <a href="{{ url_for('vote', post_id=post['id'], vote=-1) }}"><i class="fas fa-arrow-down"></i></a>
         </span>
     </div>
 </div>
@@ -19,15 +19,15 @@
 <ul class="comment-list">
     {% for comment in comments %}
     <li class="comment">
-        <p><strong>{{ comment[1] }}:</strong> {{ comment[2] }}</p>
-        {% if 'username' in session and session['username'] == comment[1] %}
-        <a href="{{ url_for('delete_comment', comment_id=comment[0]) }}">Delete</a>
+        <p><strong>{{ comment['username'] }}:</strong> {{ comment['content'] }}</p>
+        {% if 'username' in session and session['username'] == comment['username'] %}
+        <a href="{{ url_for('delete_comment', comment_id=comment['id']) }}">Delete</a>
         {% endif %}
     </li>
     {% endfor %}
 </ul>
 
-<form action="{{ url_for('create_comment', post_id=post[0]) }}" method="post">
+<form action="{{ url_for('create_comment', post_id=post['id']) }}" method="post">
     <label for="comment">Add a comment:</label>
     <textarea id="comment" name="comment" rows="4" required></textarea>
     <button type="submit">Submit</button>
