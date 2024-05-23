@@ -54,7 +54,8 @@ def register():
             hashed_password = generate_password_hash(password)
             user_id = g.redis.incr('user:id')
             user = {'id': user_id, 'username': username, 'password': hashed_password}
-            if g.redis.hsetnx(f'user:{username}', mapping=user):
+            if not g.redis.exists(f'user:{username}'):
+                g.redis.hset(f'user:{username}', mapping=user)
                 session['username'] = username
                 session['user_id'] = user_id
                 if username == 'admin':
@@ -76,7 +77,8 @@ def profile():
         if new_username and len(new_username) < 3:
             flash('Username must be at least 3 characters long', 'error')
         elif new_username:
-            if g.redis.hsetnx(f'user:{new_username}', mapping=g.redis.hgetall(f'user:{session["username"]}')):
+            if not g.redis.exists(f'user:{new_username}'):
+                g.redis.hset(f'user:{new_username}', mapping=g.redis.hgetall(f'user:{session["username"]}'))
                 g.redis.delete(f'user:{session["username"]}')
                 session['username'] = new_username
                 flash('Username updated successfully', 'success')
@@ -175,19 +177,18 @@ def view_post(post_id):
     post = eval(g.redis.lindex('posts', post_id - 1))
     comments = [eval(comment) for comment in g.redis.lrange(f'post:{post_id}:comments', 0, -1)]
     user_votes = {int(post_id): int(vote) for post_id, vote in g.redis.hgetall(f'user:{session["user_id"]}:votes').items()}
-    return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
+    return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes)
 
-@app.route('/delete_comment/<int:comment_id>')
-def delete_comment(comment_id):
+@app.route('/delete_comment/<int:comment_id>/<int:post_id>')
+def delete_comment(comment_id, post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_id = session['user_id']
     comment = eval(g.redis.get(f'comment:{comment_id}'))
-    if comment and comment['user_id'] == user_id:
-        g.redis.lrem(f'post:{comment["post_id"]}:comments', 0, str(comment))
+    if comment and comment['user_id'] == session['user_id']:
+        g.redis.lrem(f'post:{post_id}:comments', 0, str(comment))
         g.redis.delete(f'comment:{comment_id}')
         flash('Comment deleted successfully', 'success')
-    return redirect(url_for('view_post', post_id=comment['post_id']))
+    return redirect(url_for('view_post', post_id=post_id))
 
 @app.route('/logout')
 def logout():
