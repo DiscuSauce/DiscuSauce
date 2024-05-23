@@ -1,44 +1,49 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-from flask_session import Session
-from werkzeug.security import generate_password_hash, check_password_hash
 import redis
-import os
-import json
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', '@@@qazaq@@@')
+app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# Configure Redis
-app.config['SESSION_TYPE'] = 'redis'
-app.config['SESSION_REDIS'] = redis.from_url(os.environ['UPSTASH_REDIS_REST_URL'])
+# Configuration for Redis
+redis_host = 'eu1-secure-albacore-38686.upstash.io'
+redis_port = 38686
+redis_password = '61ec78bf004a425a8eeb3555735646d7'
 
-# Initialize session
-Session(app)
+# Create Redis connection
+r = redis.StrictRedis(
+    host=redis_host,
+    port=redis_port,
+    password=redis_password,
+    ssl=True,
+    decode_responses=True
+)
 
-r = redis.from_url(os.environ['UPSTASH_REDIS_REST_URL'])
+def init_redis():
+    r.flushdb()  # Clears the Redis database
+    print("Redis database initialized.")
 
-def get_user_id(username):
-    user_id = r.get(f"user:id:{username.lower()}")
-    if user_id:
-        return int(user_id)
-    return None
+init_redis()
 
-def get_username(user_id):
-    username = r.get(f"user:username:{user_id}")
-    if username:
-        return username.decode('utf-8')
-    return None
+@app.before_request
+def before_request():
+    g.db = r
+
+@app.teardown_request
+def teardown_request(exception):
+    pass  # Redis connection does not need to be closed
 
 @app.route('/')
 def index():
     if 'username' in session:
         posts = []
-        for key in r.scan_iter("post:*"):
-            post = json.loads(r.get(key))
-            post['username'] = get_username(post['user_id'])
+        for post_id in r.smembers('posts'):
+            post = r.hgetall(f'post:{post_id}')
+            post['id'] = post_id
+            post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
             posts.append(post)
-        posts.sort(key=lambda x: (x['upvotes'] - x['downvotes']), reverse=True)
-        user_votes = {int(post_id): int(vote) for post_id, vote in r.hgetall(f"user:votes:{session['user_id']}").items()}
+        posts.sort(key=lambda x: int(x['upvotes']) - int(x['downvotes']), reverse=True)
+        user_votes = {post_id: r.hget(f'vote:{post_id}:{session["user_id"]}', 'vote') for post_id in r.smembers('posts')}
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
 
@@ -47,10 +52,10 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        user_id = get_user_id(username)
+        user_id = r.get(f'username:{username}')
         if user_id:
-            stored_password = r.hget(f"user:{user_id}", "password").decode('utf-8')
-            if check_password_hash(stored_password, password):
+            user = r.hgetall(f'user:{user_id}')
+            if user and check_password_hash(user['password'], password):
                 session['username'] = username
                 session['user_id'] = user_id
                 if username == 'admin':
@@ -70,18 +75,17 @@ def register():
             flash('Password must be at least 8 characters long', 'error')
         else:
             hashed_password = generate_password_hash(password)
-            user_id = r.incr("user:id")
-            try:
-                r.set(f"user:id:{username.lower()}", user_id)
-                r.set(f"user:username:{user_id}", username)
-                r.hset(f"user:{user_id}", mapping={"username": username, "password": hashed_password})
+            if r.get(f'username:{username}'):
+                flash('Username already exists', 'error')
+            else:
+                user_id = r.incr('user:id')
+                r.hmset(f'user:{user_id}', {'username': username, 'password': hashed_password})
+                r.set(f'username:{username}', user_id)
                 session['username'] = username
                 session['user_id'] = user_id
                 if username == 'admin':
                     session['admin'] = True
                 return redirect(url_for('index'))
-            except redis.exceptions.RedisError as e:
-                flash(f'Error: {e}', 'error')
     return render_template('register.html')
 
 @app.route('/profile', methods=['GET', 'POST'])
@@ -96,14 +100,15 @@ def profile():
         if new_username and len(new_username) < 3:
             flash('Username must be at least 3 characters long', 'error')
         elif new_username:
-            old_username = session['username']
-            if r.setnx(f"user:id:{new_username.lower()}", user_id):
-                r.rename(f"user:id:{old_username.lower()}", f"user:id:{new_username.lower()}")
-                r.set(f"user:username:{user_id}", new_username)
+            if r.get(f'username:{new_username}'):
+                flash('Username already exists', 'error')
+            else:
+                old_username = r.hget(f'user:{user_id}', 'username')
+                r.hset(f'user:{user_id}', 'username', new_username)
+                r.delete(f'username:{old_username}')
+                r.set(f'username:{new_username}', user_id)
                 session['username'] = new_username
                 flash('Username updated successfully', 'success')
-            else:
-                flash('Username already exists', 'error')
         if new_password:
             if len(new_password) < 8:
                 flash('Password must be at least 8 characters long', 'error')
@@ -111,11 +116,9 @@ def profile():
                 flash('Passwords do not match', 'error')
             else:
                 hashed_password = generate_password_hash(new_password)
-                r.set(f"user:password:{user_id}", hashed_password)
+                r.hset(f'user:{user_id}', 'password', hashed_password)
                 flash('Password updated successfully', 'success')
-    user_posts = []
-    for key in r.scan_iter(f"post:*:user_id:{user_id}"):
-        user_posts.append(json.loads(r.get(key)))
+    user_posts = [r.hgetall(f'post:{post_id}') for post_id in r.smembers(f'user:{user_id}:posts')]
     return render_template('profile.html', posts=user_posts)
 
 @app.route('/create_post', methods=['GET', 'POST'])
@@ -127,17 +130,11 @@ def create_post():
         if len(content.split()) > 64:
             flash('Post content exceeds 64 words limit', 'error')
         else:
-            post_id = r.incr("post:id")
             user_id = session['user_id']
-            post_data = {
-                "id": post_id,
-                "user_id": user_id,
-                "content": content,
-                "upvotes": 0,
-                "downvotes": 0
-            }
-            r.set(f"post:{post_id}", json.dumps(post_data))
-            r.set(f"post:{post_id}:user_id:{user_id}", json.dumps(post_data))
+            post_id = r.incr('post:id')
+            r.hmset(f'post:{post_id}', {'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0})
+            r.sadd('posts', post_id)
+            r.sadd(f'user:{user_id}:posts', post_id)
             flash('Post created successfully', 'success')
             return redirect(url_for('index'))
     return render_template('create_post.html')
@@ -147,17 +144,12 @@ def delete_post(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    post_data = r.get(f"post:{post_id}")
-    if post_data:
-        post = json.loads(post_data)
-        if post['user_id'] == user_id:
-            r.delete(f"post:{post_id}")
-            r.delete(f"post:{post_id}:user_id:{user_id}")
-            for key in r.scan_iter(f"comment:{post_id}:*"):
-                r.delete(key)
-            for key in r.scan_iter(f"vote:{post_id}:*"):
-                r.delete(key)
-            flash('Post deleted successfully', 'success')
+    post = r.hgetall(f'post:{post_id}')
+    if post and post['user_id'] == str(user_id):
+        r.delete(f'post:{post_id}')
+        r.srem('posts', post_id)
+        r.srem(f'user:{user_id}:posts', post_id)
+        flash('Post deleted successfully', 'success')
     return redirect(url_for('profile'))
 
 @app.route('/vote/<int:post_id>/<int:vote>')
@@ -165,33 +157,28 @@ def vote(post_id, vote):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    existing_vote = r.hget(f"user:votes:{user_id}", post_id)
-    post_data = r.get(f"post:{post_id}")
-    if post_data:
-        post = json.loads(post_data)
-        if existing_vote:
-            existing_vote = int(existing_vote)
-            if existing_vote == vote:
-                r.hdel(f"user:votes:{user_id}", post_id)
-                if vote == 1:
-                    post['upvotes'] -= 1
-                else:
-                    post['downvotes'] -= 1
-            else:
-                r.hset(f"user:votes:{user_id}", post_id, vote)
-                if vote == 1:
-                    post['upvotes'] += 1
-                    post['downvotes'] -= 1
-                else:
-                    post['upvotes'] -= 1
-                    post['downvotes'] += 1
-        else:
-            r.hset(f"user:votes:{user_id}", post_id, vote)
+    existing_vote = r.hget(f'vote:{post_id}:{user_id}', 'vote')
+    if existing_vote:
+        if int(existing_vote) == vote:
+            r.delete(f'vote:{post_id}:{user_id}')
             if vote == 1:
-                post['upvotes'] += 1
+                r.hincrby(f'post:{post_id}', 'upvotes', -1)
             else:
-                post['downvotes'] += 1
-        r.set(f"post:{post_id}", json.dumps(post))
+                r.hincrby(f'post:{post_id}', 'downvotes', -1)
+        else:
+            r.hset(f'vote:{post_id}:{user_id}', 'vote', vote)
+            if vote == 1:
+                r.hincrby(f'post:{post_id}', 'upvotes', 1)
+                r.hincrby(f'post:{post_id}', 'downvotes', -1)
+            else:
+                r.hincrby(f'post:{post_id}', 'upvotes', -1)
+                r.hincrby(f'post:{post_id}', 'downvotes', 1)
+    else:
+        r.hset(f'vote:{post_id}:{user_id}', 'vote', vote)
+        if vote == 1:
+            r.hincrby(f'post:{post_id}', 'upvotes', 1)
+        else:
+            r.hincrby(f'post:{post_id}', 'downvotes', 1)
     return redirect(url_for('index'))
 
 @app.route('/post/<int:post_id>', methods=['GET', 'POST'])
@@ -201,44 +188,29 @@ def view_post(post_id):
     if request.method == 'POST':
         comment_content = request.form['comment']
         if comment_content:
-            comment_id = r.incr("comment:id")
             user_id = session['user_id']
-            comment_data = {
-                "id": comment_id,
-                "post_id": post_id,
-                "user_id": user_id,
-                "content": comment_content
-            }
-            r.set(f"comment:{post_id}:{comment_id}", json.dumps(comment_data))
+            comment_id = r.incr('comment:id')
+            r.hmset(f'comment:{comment_id}', {'post_id': post_id, 'user_id': user_id, 'content': comment_content})
+            r.sadd(f'post:{post_id}:comments', comment_id)
             flash('Comment added successfully', 'success')
-    post_data = r.get(f"post:{post_id}")
-    if post_data:
-        post = json.loads(post_data)
-        post['username'] = get_username(post['user_id'])
-        comments = []
-        for key in r.scan_iter(f"comment:{post_id}:*"):
-            comment = json.loads(r.get(key))
-            comment['username'] = get_username(comment['user_id'])
-            comments.append(comment)
-        user_votes = {int(pid): int(vote) for pid, vote in r.hgetall(f"user:votes:{session['user_id']}").items()}
-        return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
-    return redirect(url_for('index'))
+    post = r.hgetall(f'post:{post_id}')
+    post['id'] = post_id
+    post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
+    comments = [r.hgetall(f'comment:{comment_id}') for comment_id in r.smembers(f'post:{post_id}:comments')]
+    for comment in comments:
+        comment['username'] = r.hget(f'user:{comment["user_id"]}', 'username')
+    user_votes = {post_id: r.hget(f'vote:{post_id}:{session["user_id"]}', 'vote') for post_id in r.smembers('posts')}
+    return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
 
 @app.route('/delete_comment/<int:comment_id>')
 def delete_comment(comment_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    comment_key = None
-    for key in r.scan_iter(f"comment:*:{comment_id}"):
-        comment_data = r.get(key)
-        if comment_data:
-            comment = json.loads(comment_data)
-            if comment['user_id'] == user_id:
-                comment_key = key
-                break
-    if comment_key:
-        r.delete(comment_key)
+    comment = r.hgetall(f'comment:{comment_id}')
+    if comment and comment['user_id'] == str(user_id):
+        r.delete(f'comment:{comment_id}')
+        r.srem(f'post:{comment["post_id"]}:comments', comment_id)
         flash('Comment deleted successfully', 'success')
     return redirect(url_for('view_post', post_id=comment['post_id']))
 
@@ -255,14 +227,9 @@ def create_comment(post_id):
         return redirect(url_for('login'))
     content = request.form['comment']
     user_id = session['user_id']
-    comment_id = r.incr("comment:id")
-    comment_data = {
-        "id": comment_id,
-        "post_id": post_id,
-        "user_id": user_id,
-        "content": content
-    }
-    r.set(f"comment:{post_id}:{comment_id}", json.dumps(comment_data))
+    comment_id = r.incr('comment:id')
+    r.hmset(f'comment:{comment_id}', {'post_id': post_id, 'user_id': user_id, 'content': content})
+    r.sadd(f'post:{post_id}:comments', comment_id)
     flash('Comment added successfully', 'success')
     return redirect(url_for('view_post', post_id=post_id))
 
@@ -270,43 +237,26 @@ def create_comment(post_id):
 def admin():
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    users = []
-    for key in r.scan_iter("user:username:*"):
-        user_id = key.split(":")[-1]
-        username = r.get(key).decode('utf-8')
-        users.append({"id": int(user_id), "username": username})
-    posts = []
-    for key in r.scan_iter("post:*"):
-        posts.append(json.loads(r.get(key)))
+    users = [{'id': user_id, 'username': r.hget(f'user:{user_id}', 'username')} for user_id in r.keys('user:*') if user_id != 'user:id']
+    posts = [{'id': post_id, 'content': r.hget(f'post:{post_id}', 'content')} for post_id in r.smembers('posts')]
     return render_template('admin.html', users=users, posts=posts)
 
 @app.route('/delete_user/<int:user_id>')
 def delete_user(user_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    username = get_username(user_id)
-    if username:
-        r.delete(f"user:id:{username.lower()}")
-        r.delete(f"user:username:{user_id}")
-        r.delete(f"user:password:{user_id}")
-        r.delete(f"user:votes:{user_id}")
-        flash('User deleted successfully', 'success')
+    r.delete(f'user:{user_id}')
+    r.delete(f'username:{r.hget(f'user:{user_id}', 'username')}')
+    flash('User deleted successfully', 'success')
     return redirect(url_for('admin'))
 
 @app.route('/admin_delete_post/<int:post_id>')
 def admin_delete_post(post_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    post_data = r.get(f"post:{post_id}")
-    if post_data:
-        post = json.loads(post_data)
-        r.delete(f"post:{post_id}")
-        r.delete(f"post:{post_id}:user_id:{post['user_id']}")
-        for key in r.scan_iter(f"comment:{post_id}:*"):
-            r.delete(key)
-        for key in r.scan_iter(f"vote:{post_id}:*"):
-            r.delete(key)
-        flash('Post deleted successfully', 'success')
+    r.delete(f'post:{post_id}')
+    r.srem('posts', post_id)
+    flash('Post deleted successfully', 'success')
     return redirect(url_for('admin'))
 
 @app.errorhandler(Exception)
