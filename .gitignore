@@ -1,5 +1,4 @@
-__pycache__/
 *.pyc
+__pycache__/
 instance/
 .env
-app.db
