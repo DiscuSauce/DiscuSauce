@@ -1,16 +1,21 @@
-import os
-from flask import Flask, render_template, request, redirect, url_for, session, flash, g
+from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask_session import Session
 from werkzeug.security import generate_password_hash, check_password_hash
 import redis
+import os
 import json
 
 app = Flask(__name__)
-app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
+app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key')
 
-# Load Redis configuration from environment variables
-redis_url = os.getenv('UPSTASH_REDIS_REST_URL')
-redis_token = os.getenv('UPSTASH_REDIS_REST_TOKEN')
-r = redis.Redis.from_url(redis_url, password=redis_token, ssl=True)
+# Configure Redis
+app.config['SESSION_TYPE'] = 'redis'
+app.config['SESSION_REDIS'] = redis.from_url(os.environ['UPSTASH_REDIS_REST_URL'])
+
+# Initialize session
+Session(app)
+
+r = redis.from_url(os.environ['UPSTASH_REDIS_REST_URL'])
 
 def get_user_id(username):
     user_id = r.get(f"user:id:{username.lower()}")
@@ -23,12 +28,6 @@ def get_username(user_id):
     if username:
         return username.decode('utf-8')
     return None
-
-@app.before_request
-def before_request():
-    if 'username' in session:
-        g.username = session['username']
-        g.user_id = session['user_id']
 
 @app.route('/')
 def index():
@@ -50,7 +49,7 @@ def login():
         password = request.form['password']
         user_id = get_user_id(username)
         if user_id:
-            stored_password = r.get(f"user:password:{user_id}").decode('utf-8')
+            stored_password = r.hget(f"user:{user_id}", "password").decode('utf-8')
             if check_password_hash(stored_password, password):
                 session['username'] = username
                 session['user_id'] = user_id
@@ -72,16 +71,17 @@ def register():
         else:
             hashed_password = generate_password_hash(password)
             user_id = r.incr("user:id")
-            if not r.setnx(f"user:id:{username.lower()}", user_id):
-                flash('Username already exists', 'error')
-            else:
+            try:
+                r.set(f"user:id:{username.lower()}", user_id)
                 r.set(f"user:username:{user_id}", username)
-                r.set(f"user:password:{user_id}", hashed_password)
+                r.hset(f"user:{user_id}", mapping={"username": username, "password": hashed_password})
                 session['username'] = username
                 session['user_id'] = user_id
                 if username == 'admin':
                     session['admin'] = True
                 return redirect(url_for('index'))
+            except redis.exceptions.RedisError as e:
+                flash(f'Error: {e}', 'error')
     return render_template('register.html')
 
 @app.route('/profile', methods=['GET', 'POST'])
