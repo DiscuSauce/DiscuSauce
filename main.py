@@ -9,16 +9,24 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY')
 
-DATABASE_URL = os.environ['DATABASE_URL']
+DATABASE_URL = os.environ.get('DATABASE_URL')
 
 def get_db():
     if 'db' not in g:
-        g.db = psycopg2.connect(DATABASE_URL, sslmode='require')
+        try:
+            g.db = psycopg2.connect(DATABASE_URL, sslmode='require')
+        except psycopg2.DatabaseError as e:
+            print(f"Error connecting to the database: {e}")
+            return None
     return g.db
 
 def init_db():
+    db = get_db()
+    if db is None:
+        print("Failed to initialize the database connection.")
+        return
+
     try:
-        db = get_db()
         cursor = db.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS users
                           (id SERIAL PRIMARY KEY, 
@@ -203,130 +211,15 @@ def vote(post_id, vote):
     if existing_vote:
         if existing_vote[3] == vote:
             cursor.execute('DELETE FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
-            if vote == 1:
-                cursor.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = %s', (post_id,))
-            else:
-                cursor.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = %s', (post_id,))
         else:
             cursor.execute('UPDATE votes SET vote = %s WHERE post_id = %s AND user_id = %s', (vote, post_id, user_id))
-            if vote == 1:
-                cursor.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = %s', (post_id,))
-            else:
-                cursor.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = %s', (post_id,))
     else:
         cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, vote))
-        if vote == 1:
-            cursor.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = %s', (post_id,))
-        else:
-            cursor.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = %s', (post_id,))
+    cursor.execute('UPDATE posts SET upvotes = upvotes + %s, downvotes = downvotes + %s WHERE id = %s', 
+                   (1 if vote == 1 else 0, 1 if vote == -1 else 0, post_id))
     g.db.commit()
     cursor.close()
     return redirect(url_for('index'))
 
-@app.route('/post/<int:post_id>', methods=['GET', 'POST'])
-def view_post(post_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    if request.method == 'POST':
-        comment_content = request.form['comment']
-        if comment_content:
-            user_id = session['user_id']
-            cursor = g.db.cursor()
-            cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, user_id, comment_content))
-            g.db.commit()
-            flash('Comment added successfully', 'success')
-    cursor = g.db.cursor()
-    cursor.execute('''
-        SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes 
-        FROM posts 
-        JOIN users ON posts.user_id = users.id 
-        WHERE posts.id = %s
-    ''', (post_id,))
-    post = cursor.fetchone()
-    cursor.execute('''
-        SELECT comments.id, users.username, comments.content 
-        FROM comments 
-        JOIN users ON comments.user_id = users.id 
-        WHERE comments.post_id = %s
-    ''', (post_id,))
-    comments = cursor.fetchall()
-    cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = %s', (session['user_id'],))
-    user_votes = {row[0]: row[1] for row in cursor.fetchall()}
-    cursor.close()
-    return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
-
-@app.route('/delete_comment/<int:comment_id>')
-def delete_comment(comment_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    user_id = session['user_id']
-    cursor = g.db.cursor()
-    cursor.execute('SELECT * FROM comments WHERE id = %s AND user_id = %s', (comment_id, user_id))
-    comment = cursor.fetchone()
-    if comment:
-        cursor.execute('DELETE FROM comments WHERE id = %s', (comment_id,))
-        g.db.commit()
-        flash('Comment deleted successfully', 'success')
-    cursor.close()
-    return redirect(url_for('view_post', post_id=comment[1]))
-
-@app.route('/logout')
-def logout():
-    session.pop('username', None)
-    session.pop('user_id', None)
-    session.pop('admin', None)
-    return redirect(url_for('login'))
-
-@app.route('/create_comment/<int:post_id>', methods=['POST'])
-def create_comment(post_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    content = request.form['comment']
-    user_id = session['user_id']
-    cursor = g.db.cursor()
-    cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, user_id, content))
-    g.db.commit()
-    flash('Comment added successfully', 'success')
-    return redirect(url_for('view_post', post_id=post_id))
-
-@app.route('/admin')
-def admin():
-    if 'username' not in session or not session.get('admin'):
-        return redirect(url_for('login'))
-    cursor = g.db.cursor()
-    cursor.execute('SELECT id, username FROM users')
-    users = cursor.fetchall()
-    cursor.execute('SELECT id, content FROM posts')
-    posts = cursor.fetchall()
-    cursor.close()
-    return render_template('admin.html', users=users, posts=posts)
-
-@app.route('/delete_user/<int:user_id>')
-def delete_user(user_id):
-    if 'username' not in session or not session.get('admin'):
-        return redirect(url_for('login'))
-    cursor = g.db.cursor()
-    cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
-    g.db.commit()
-    cursor.close()
-    flash('User deleted successfully', 'success')
-    return redirect(url_for('admin'))
-
-@app.route('/admin_delete_post/<int:post_id>')
-def admin_delete_post(post_id):
-    if 'username' not in session or not session.get('admin'):
-        return redirect(url_for('login'))
-    cursor = g.db.cursor()
-    cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
-    g.db.commit()
-    cursor.close()
-    flash('Post deleted successfully', 'success')
-    return redirect(url_for('admin'))
-
-@app.errorhandler(Exception)
-def handle_exception(e):
-    print(f"Error: {e}")
-    return str(e), 500
-
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0')
+    app.run(debug=True)
