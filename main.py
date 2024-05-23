@@ -10,7 +10,7 @@ def init_db():
         with sqlite3.connect('app.db') as conn:
             conn.execute('''CREATE TABLE IF NOT EXISTS users
                             (id INTEGER PRIMARY KEY, 
-                             username TEXT UNIQUE, 
+                             username TEXT UNIQUE COLLATE NOCASE, 
                              password TEXT)''')
             conn.execute('''CREATE TABLE IF NOT EXISTS posts
                             (id INTEGER PRIMARY KEY, 
