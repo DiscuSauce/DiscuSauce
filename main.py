@@ -1,23 +1,27 @@
-import mysql.connector
+import os
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
 import html
+import mysql.connector
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# Configuration for MySQL
-db_config = {
-    'user': 'jck8kpiny0fmzh0u',
-    'password': 'hllh8m1l605jp1is',
-    'host': 'm7wltxurw8d2n21q.cbetxkdyhwsb.us-east-1.rds.amazonaws.com',
-    'database': 'l8p7bk55le9p4st2',
-    'port': 3306
-}
+# MySQL configuration
+MYSQL_USER = os.getenv('MYSQL_USER', 'jck8kpiny0fmzh0u')
+MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'hllh8m1l605jp1is')
+MYSQL_HOST = os.getenv('MYSQL_HOST', 'm7wltxurw8d2n21q.cbetxkdyhwsb.us-east-1.rds.amazonaws.com')
+MYSQL_DB = os.getenv('MYSQL_DB', 'l8p7bk55le9p4st2')
 
 def get_db_connection():
-    return mysql.connector.connect(**db_config)
+    connection = mysql.connector.connect(
+        user=MYSQL_USER,
+        password=MYSQL_PASSWORD,
+        host=MYSQL_HOST,
+        database=MYSQL_DB
+    )
+    return connection
 
 @app.before_request
 def before_request():
@@ -26,12 +30,8 @@ def before_request():
 
 @app.teardown_request
 def teardown_request(exception):
-    cursor = getattr(g, 'cursor', None)
-    if cursor is not None:
-        cursor.close()
-    db = getattr(g, 'db', None)
-    if db is not None:
-        db.close()
+    g.cursor.close()
+    g.db.close()
 
 def sanitize_input(input):
     return html.escape(input)
