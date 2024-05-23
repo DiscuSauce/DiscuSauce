@@ -210,7 +210,7 @@ def create_post():
             flash_message('error', 'Post content exceeds 64 words limit')
         else:
             user_id = session['user_id']
-            post_id = create_post(user_id, content)
+            post_id = insert_post(user_id, content)  # Вот здесь вызываем функцию insert_post()
             flash_message('success', 'Post created successfully')
             return redirect(url_for('index'))
     return render_template('create_post.html')
