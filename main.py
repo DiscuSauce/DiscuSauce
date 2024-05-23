@@ -139,7 +139,7 @@ def create_post():
         if len(content.split()) > 64:
             flash('Post content exceeds 64 words limit', 'error')
         else:
-            user_id = session['user_id']
+            user_id = int(session['user_id'])  # Fix applied here
             post_id = r.incr('post:id')  # Get a new post ID
             r.hmset(f'post:{post_id}', {'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0})
             r.lpush('posts', post_id)
