@@ -200,7 +200,7 @@ def profile():
     user_posts = g.cursor.fetchall()
     return render_template('profile.html', posts=user_posts)
 
-@app.route('/create_post', methods=['POST'])
+@app.route('/create_post', methods=['GET', 'POST'])
 def create_post():
     if 'username' not in session:
         return redirect(url_for('login'))
