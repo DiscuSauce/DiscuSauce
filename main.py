@@ -1,4 +1,4 @@
-import redis
+import mysql.connector
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
@@ -7,65 +7,54 @@ import html
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# Configuration for Redis
-redis_host = 'eu1-secure-albacore-38686.upstash.io'
-redis_port = 38686
-redis_password = '61ec78bf004a425a8eeb3555735646d7'
+# Configuration for MySQL
+db_config = {
+    'user': 'jck8kpiny0fmzh0u',
+    'password': 'hllh8m1l605jp1is',
+    'host': 'm7wltxurw8d2n21q.cbetxkdyhwsb.us-east-1.rds.amazonaws.com',
+    'database': 'l8p7bk55le9p4st2',
+    'port': 3306
+}
 
-# Create Redis connection
-try:
-    r = redis.StrictRedis(
-        host=redis_host,
-        port=redis_port,
-        password=redis_password,
-        ssl=True,
-        decode_responses=True
-    )
-    # Test Redis connection
-    r.ping()
-    print("Connected to Redis successfully!")
-except redis.ConnectionError as e:
-    print(f"Redis connection failed: {e}")
-
-def init_redis():
-    try:
-        r.flushdb()  # Clears the Redis database
-        print("Redis database initialized.")
-    except Exception as e:
-        print(f"Failed to initialize Redis: {e}")
-
-init_redis()
+def get_db_connection():
+    return mysql.connector.connect(**db_config)
 
 @app.before_request
 def before_request():
-    g.db = r
+    g.db = get_db_connection()
+    g.cursor = g.db.cursor(dictionary=True)
 
 @app.teardown_request
 def teardown_request(exception):
-    pass  # Redis connection does not need to be closed
+    cursor = getattr(g, 'cursor', None)
+    if cursor is not None:
+        cursor.close()
+    db = getattr(g, 'db', None)
+    if db is not None:
+        db.close()
 
 def sanitize_input(input):
     return html.escape(input)
 
 def get_user_id(username):
-    return r.get(f'username:{username}')
+    g.cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
+    user = g.cursor.fetchone()
+    return user['id'] if user else None
 
 def get_user(user_id):
-    return r.hgetall(f'user:{user_id}')
+    g.cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
+    return g.cursor.fetchone()
 
 def create_user(username, password):
-    user_id = r.incr('user:id')
     hashed_password = generate_password_hash(password)
-    r.hset(f'user:{user_id}', mapping={'username': username, 'password': hashed_password})
-    r.set(f'username:{username}', user_id)
-    return user_id
+    g.cursor.execute('INSERT INTO users (username, password) VALUES (%s, %s)', (username, hashed_password))
+    g.db.commit()
+    return g.cursor.lastrowid
 
 def create_post(user_id, content):
-    post_id = r.incr('post:id')
-    r.hset(f'post:{post_id}', mapping={'user_id': user_id, 'content': sanitize_input(content), 'upvotes': 0, 'downvotes': 0})
-    r.sadd('posts', post_id)
-    r.sadd(f'user:{user_id}:posts', post_id)
-    return post_id
+    g.cursor.execute('INSERT INTO posts (user_id, content, upvotes, downvotes) VALUES (%s, %s, 0, 0)', (user_id, sanitize_input(content)))
+    g.db.commit()
+    return g.cursor.lastrowid
 
 def flash_message(category, message):
     flash(message, category)
@@ -78,14 +67,10 @@ def is_safe_url(target):
 @app.route('/')
 def index():
     if 'username' in session:
-        posts = []
-        for post_id in r.smembers('posts'):
-            post = r.hgetall(f'post:{post_id}')
-            post['id'] = post_id
-            post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
-            posts.append(post)
-        posts.sort(key=lambda x: int(x['upvotes']) - int(x['downvotes']), reverse=True)
-        user_votes = {post_id: r.hget(f'vote:{post_id}:{session["user_id"]}', 'vote') for post_id in r.smembers('posts')}
+        g.cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY (upvotes - downvotes) DESC')
+        posts = g.cursor.fetchall()
+        g.cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = %s', (session['user_id'],))
+        user_votes = {vote['post_id']: vote['vote'] for vote in g.cursor.fetchall()}
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
 
@@ -142,10 +127,8 @@ def profile():
             if get_user_id(new_username):
                 flash_message('error', 'Username already exists')
             else:
-                old_username = r.hget(f'user:{user_id}', 'username')
-                r.hset(f'user:{user_id}', 'username', new_username)
-                r.delete(f'username:{old_username}')
-                r.set(f'username:{new_username}', user_id)
+                old_username = session['username']
+                g.cursor.execute('UPDATE users SET username = %s WHERE id = %s', (new_username, user_id))
                 session['username'] = new_username
                 flash_message('success', 'Username updated successfully')
         if new_password:
@@ -155,15 +138,16 @@ def profile():
                 flash_message('error', 'Passwords do not match')
             else:
                 hashed_password = generate_password_hash(new_password)
-                r.hset(f'user:{user_id}', 'password', hashed_password)
+                g.cursor.execute('UPDATE users SET password = %s WHERE id = %s', (hashed_password, user_id))
                 flash_message('success', 'Password updated successfully')
-    user_posts = [r.hgetall(f'post:{post_id}') for post_id in r.smembers(f'user:{user_id}:posts')]
+        g.db.commit()
+    g.cursor.execute('SELECT * FROM posts WHERE user_id = %s', (user_id,))
+    user_posts = g.cursor.fetchall()
     return render_template('profile.html', posts=user_posts)
 
 @app.route('/create_post', methods=['GET', 'POST'])
 def create_post():
     if 'username' not in session:
-        flash('You need to be logged in to create a post', 'error')
         return redirect(url_for('login'))
     if request.method == 'POST':
         content = request.form['content']
@@ -181,11 +165,11 @@ def delete_post(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    post = r.hgetall(f'post:{post_id}')
-    if post and post['user_id'] == str(user_id):
-        r.delete(f'post:{post_id}')
-        r.srem('posts', post_id)
-        r.srem(f'user:{user_id}:posts', post_id)
+    g.cursor.execute('SELECT * FROM posts WHERE id = %s AND user_id = %s', (post_id, user_id))
+    post = g.cursor.fetchone()
+    if post:
+        g.cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
+        g.db.commit()
         flash_message('success', 'Post deleted successfully')
     else:
         flash_message('error', 'You are not authorized to delete this post')
@@ -196,43 +180,38 @@ def vote(post_id, vote):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    existing_vote = r.hget(f'vote:{post_id}:{user_id}', 'vote')
+    g.cursor.execute('SELECT vote FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
+    existing_vote = g.cursor.fetchone()
     if existing_vote:
-        if int(existing_vote) == vote:
-            r.delete(f'vote:{post_id}:{user_id}')
+        if existing_vote['vote'] == vote:
+            g.cursor.execute('DELETE FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
             if vote == 1:
-                r.hincrby(f'post:{post_id}', 'upvotes', -1)
+                g.cursor.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = %s', (post_id,))
             else:
-                r.hincrby(f'post:{post_id}', 'downvotes', -1)
+                g.cursor.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = %s', (post_id,))
         else:
-            r.hset(f'vote:{post_id}:{user_id}', 'vote', vote)
+            g.cursor.execute('UPDATE votes SET vote = %s WHERE post_id = %s AND user_id = %s', (vote, post_id, user_id))
             if vote == 1:
-                r.hincrby(f'post:{post_id}', 'upvotes', 1)
-                r.hincrby(f'post:{post_id}', 'downvotes', -1)
+                g.cursor.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = %s', (post_id,))
             else:
-                r.hincrby(f'post:{post_id}', 'upvotes', -1)
-                r.hincrby(f'post:{post_id}', 'downvotes', 1)
+                g.cursor.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = %s', (post_id,))
     else:
-        r.hset(f'vote:{post_id}:{user_id}', 'vote', vote)
+        g.cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, vote))
         if vote == 1:
-            r.hincrby(f'post:{post_id}', 'upvotes', 1)
+            g.cursor.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = %s', (post_id,))
         else:
-            r.hincrby(f'post:{post_id}', 'downvotes', 1)
+            g.cursor.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = %s', (post_id,))
+    g.db.commit()
     return redirect(url_for('index'))
 
 @app.route('/view_post/<int:post_id>')
 def view_post(post_id):
-    post = r.hgetall(f'post:{post_id}')
+    g.cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id WHERE posts.id = %s', (post_id,))
+    post = g.cursor.fetchone()
     if not post:
         return 'Post not found', 404
-    post['id'] = post_id
-    post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
-    comments = []
-    for comment_id in r.smembers(f'post:{post_id}:comments'):
-        comment = r.hgetall(f'comment:{comment_id}')
-        comment['id'] = comment_id
-        comment['username'] = r.hget(f'user:{comment["user_id"]}', 'username')
-        comments.append(comment)
+    g.cursor.execute('SELECT comments.*, users.username FROM comments JOIN users ON comments.user_id = users.id WHERE post_id = %s', (post_id,))
+    comments = g.cursor.fetchall()
     return render_template('view_post.html', post=post, comments=comments)
 
 @app.route('/logout')
@@ -248,9 +227,8 @@ def create_comment(post_id):
         return redirect(url_for('login'))
     content = sanitize_input(request.form['comment'])
     user_id = session['user_id']
-    comment_id = r.incr('comment:id')
-    r.hset(f'comment:{comment_id}', mapping={'post_id': post_id, 'user_id': user_id, 'content': content})
-    r.sadd(f'post:{post_id}:comments', comment_id)
+    g.cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, user_id, content))
+    g.db.commit()
     flash('Comment added successfully', 'success')
     return redirect(url_for('view_post', post_id=post_id))
 
@@ -258,17 +236,18 @@ def create_comment(post_id):
 def admin():
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    users = [{'id': user_id.split(':')[1], 'username': r.hget(user_id, 'username')} for user_id in r.keys('user:*') if user_id != 'user:id']
-    posts = [{'id': post_id, 'content': r.hget(f'post:{post_id}', 'content')} for post_id in r.smembers('posts')]
+    g.cursor.execute('SELECT id, username FROM users')
+    users = g.cursor.fetchall()
+    g.cursor.execute('SELECT id, content FROM posts')
+    posts = g.cursor.fetchall()
     return render_template('admin.html', users=users, posts=posts)
 
 @app.route('/delete_user/<int:user_id>')
 def delete_user(user_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    username = r.hget(f'user:{user_id}', 'username')
-    r.delete(f'username:{username}')
-    r.delete(f'user:{user_id}')
+    g.cursor.execute('DELETE FROM users WHERE id = %s', (user_id,))
+    g.db.commit()
     flash('User deleted successfully', 'success')
     return redirect(url_for('admin'))
 
@@ -276,8 +255,8 @@ def delete_user(user_id):
 def admin_delete_post(post_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    r.delete(f'post:{post_id}')
-    r.srem('posts', post_id)
+    g.cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
+    g.db.commit()
     flash('Post deleted successfully', 'success')
     return redirect(url_for('admin'))
 
