@@ -142,7 +142,8 @@ def create_post():
             user_id = session['user_id']
             post_id = r.incr('post:id')  # Get a new post ID
             r.hmset(f'post:{post_id}', {'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0})
-            r.lpush('posts', post_id)
+            r.sadd('posts', post_id)
+            r.sadd(f'user:{user_id}:posts', post_id)
             flash('Post created successfully', 'success')
             return redirect(url_for('index'))
     return render_template('create_post.html')
