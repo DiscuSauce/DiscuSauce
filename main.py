@@ -2,15 +2,12 @@ import os
 import psycopg2
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
-from dotenv import load_dotenv
 from urllib.parse import quote as url_quote
 
-load_dotenv()
-
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY')
+app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-DATABASE_URL = os.environ['DATABASE_URL']
+DATABASE_URL = 'postgres://otsmcreckptmxm:6c840cfd7e13bf4e4168aa8fb4466ec5ab2cba6bb766b82f785c2462773f0817@ec2-34-251-236-65.eu-west-1.compute.amazonaws.com:5432/d192qeh4mntrks'
 
 def get_db():
     if 'db' not in g:
