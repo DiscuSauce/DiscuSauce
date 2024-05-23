@@ -67,10 +67,6 @@ def init_db():
     cursor.close()
     db.close()
 
-@app.before_first_request
-def before_first_request():
-    init_db()
-
 @app.before_request
 def before_request():
     g.db = get_db_connection()
@@ -80,6 +76,10 @@ def before_request():
 def teardown_request(exception):
     g.cursor.close()
     g.db.close()
+
+@app.before_first_request
+def initialize_database():
+    init_db()
 
 def sanitize_input(input):
     return html.escape(input)
