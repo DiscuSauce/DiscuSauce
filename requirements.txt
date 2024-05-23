@@ -1,6 +1,5 @@
 Flask
 gunicorn
 redis
-flask-session
-werkzeug
+Werkzeug
 python-dotenv
