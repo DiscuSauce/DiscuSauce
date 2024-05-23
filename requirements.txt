@@ -1,3 +1,4 @@
-Flask
-gunicorn
-werkzeug
+Flask==2.1.1
+psycopg2-binary==2.9.3
+python-dotenv==0.20.0
+werkzeug==2.1.1
