@@ -1,5 +1,3 @@
-Flask
-gunicorn
-redis
-Werkzeug
-python-dotenv
+Flask==2.0.2
+gunicorn==20.1.0
+redis==3.5.3
