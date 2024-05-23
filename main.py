@@ -204,7 +204,7 @@ def view_post(post_id):
     
     return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
 
-@app.route('/delete_comment/int:comment_id')
+@app.route('/delete_comment/<int:comment_id>')
 def delete_comment(comment_id):
 if 'username' not in session:
 return redirect(url_for('login'))
