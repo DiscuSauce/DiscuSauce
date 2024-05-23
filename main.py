@@ -3,30 +3,23 @@ import psycopg2
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from dotenv import load_dotenv
+from urllib.parse import quote as url_quote
 
 load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY')
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+DATABASE_URL = os.environ['DATABASE_URL']
 
 def get_db():
     if 'db' not in g:
-        try:
-            g.db = psycopg2.connect(DATABASE_URL, sslmode='require')
-        except psycopg2.DatabaseError as e:
-            print(f"Error connecting to the database: {e}")
-            return None
+        g.db = psycopg2.connect(DATABASE_URL, sslmode='require')
     return g.db
 
 def init_db():
-    db = get_db()
-    if db is None:
-        print("Failed to initialize the database connection.")
-        return
-
     try:
+        db = get_db()
         cursor = db.cursor()
         cursor.execute('''CREATE TABLE IF NOT EXISTS users
                           (id SERIAL PRIMARY KEY, 
@@ -211,15 +204,52 @@ def vote(post_id, vote):
     if existing_vote:
         if existing_vote[3] == vote:
             cursor.execute('DELETE FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
+            if vote == 1:
+                cursor.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = %s', (post_id,))
+            else:
+                cursor.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = %s', (post_id,))
         else:
             cursor.execute('UPDATE votes SET vote = %s WHERE post_id = %s AND user_id = %s', (vote, post_id, user_id))
+            if vote == 1:
+                cursor.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = %s', (post_id,))
+            else:
+                cursor.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = %s', (post_id,))
     else:
         cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, vote))
-    cursor.execute('UPDATE posts SET upvotes = upvotes + %s, downvotes = downvotes + %s WHERE id = %s', 
-                   (1 if vote == 1 else 0, 1 if vote == -1 else 0, post_id))
+        if vote == 1:
+            cursor.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = %s', (post_id,))
+        else:
+            cursor.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = %s', (post_id,))
     g.db.commit()
     cursor.close()
     return redirect(url_for('index'))
+
+@app.route('/create_comment/<int:post_id>', methods=['POST'])
+def create_comment(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    content = request.form['content']
+    user_id = session['user_id']
+    cursor = g.db.cursor()
+    cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, user_id, content))
+    g.db.commit()
+    cursor.close()
+    return redirect(url_for('index'))
+
+@app.route('/admin', methods=['GET', 'POST'])
+def admin():
+    if 'admin' not in session:
+        return redirect(url_for('index'))
+    cursor = g.db.cursor()
+    cursor.execute('SELECT id, username FROM users')
+    users = cursor.fetchall()
+    if request.method == 'POST':
+        username = request.form['username']
+        cursor.execute('DELETE FROM users WHERE username = %s', (username,))
+        g.db.commit()
+        flash(f'User {username} deleted successfully', 'success')
+    cursor.close()
+    return render_template('admin.html', users=users)
 
 if __name__ == '__main__':
     app.run(debug=True)
