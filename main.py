@@ -200,7 +200,7 @@ def profile():
     user_posts = g.cursor.fetchall()
     return render_template('profile.html', posts=user_posts)
 
-@app.route('/create_post', methods=['GET', 'POST'])
+@app.route('/create_post', methods=['POST'])
 def create_post():
     if 'username' not in session:
         return redirect(url_for('login'))
@@ -210,10 +210,18 @@ def create_post():
             flash_message('error', 'Post content exceeds 64 words limit')
         else:
             user_id = session['user_id']
-            post_id = insert_post(user_id, content)  # Вот здесь вызываем функцию insert_post()
+            create_post_in_db(user_id, content)
             flash_message('success', 'Post created successfully')
             return redirect(url_for('index'))
     return render_template('create_post.html')
+
+def create_post_in_db(user_id, content):
+    db = get_db_connection()
+    cursor = db.cursor()
+    cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
+    db.commit()
+    cursor.close()
+    db.close()
 
 @app.route('/delete_post/<int:post_id>')
 def delete_post(post_id):
