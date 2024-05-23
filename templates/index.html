@@ -5,16 +5,16 @@
 {% block content %}
     <h2>Top Posts</h2>
     <div class="post-list">
-        {% for post_id, post in posts.items() %}
+        {% for post in posts %}
             <div class="post">
                 <div class="post-header">
                     <p class="author">{{ post['username'] }}</p>
                     <div class="votes">
-                        <a href="{{ url_for('vote', post_id=post_id, vote=1) }}" class="upvote {{ 'active' if user_votes.get(post_id) == 1 else '' }}">
+                        <a href="{{ url_for('vote', post_id=post['id'], vote=1) }}" class="upvote {{ 'active' if user_votes.get(post['id']) == 1 else '' }}">
                             <i class="fas fa-arrow-up"></i>
                         </a>
                         <span class="score">{{ post['upvotes'] - post['downvotes'] }}</span>
-                        <a href="{{ url_for('vote', post_id=post_id, vote=0) }}" class="upvote {{ 'active' if user_votes.get(post_id) == 0 else '' }}">
+                        <a href="{{ url_for('vote', post_id=post['id'], vote=0) }}" class="upvote {{ 'active' if user_votes.get(post['id']) == 0 else '' }}">
                             <i class="fas fa-arrow-down"></i>
                         </a>
                     </div>
@@ -23,9 +23,9 @@
                     <p>{{ post['content'] }}</p>
                 </div>
                 <div class="post-footer">
-                    <a href="{{ url_for('view_post', post_id=post_id) }}">Comments</a>
+                    <a href="{{ url_for('view_post', post_id=post['id']) }}">Comments</a>
                     {% if session['user_id'] == post['user_id'] or session.get('admin') %}
-                        <a href="{{ url_for('delete_post', post_id=post_id) }}">Delete</a>
+                        <a href="{{ url_for('delete_post', post_id=post['id']) }}">Delete</a>
                     {% endif %}
                 </div>
             </div>
