@@ -6,7 +6,7 @@ import os
 import json
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'your-secret-key')
+app.secret_key = os.environ.get('SECRET_KEY', '@@@qazaq@@@')
 
 # Configure Redis
 app.config['SESSION_TYPE'] = 'redis'
