@@ -11,8 +11,8 @@ redis_host = 'eu1-secure-albacore-38686.upstash.io'
 redis_port = 38686
 redis_password = '61ec78bf004a425a8eeb3555735646d7'
 
-# Configure Redis connection pool
-redis_pool = ConnectionPool(host=redis_host, port=redis_port, password=redis_password, ssl=True)
+# Create Redis connection using the connection pool
+r = redis.Redis(host=redis_host, port=redis_port, password=redis_password, ssl=True)
 
 # Create Redis connection using the connection pool
 r = StrictRedis(connection_pool=redis_pool)
