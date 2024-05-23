@@ -1,67 +1,28 @@
-import os
-import psycopg2
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
+from upstash_redis import Redis
+import os
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'default_secret_key')
+app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-DATABASE_URL = os.environ['DATABASE_URL']
-
-def get_db():
-    if 'db' not in g:
-        g.db = psycopg2.connect(DATABASE_URL, sslmode='require')
-    return g.db
-
-def init_db():
-    with app.app_context():
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS users
-                          (id SERIAL PRIMARY KEY, 
-                           username TEXT UNIQUE, 
-                           password TEXT)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS posts
-                          (id SERIAL PRIMARY KEY, 
-                           user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, 
-                           content TEXT, 
-                           upvotes INTEGER DEFAULT 0, 
-                           downvotes INTEGER DEFAULT 0)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS comments
-                          (id SERIAL PRIMARY KEY, 
-                           post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, 
-                           user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, 
-                           content TEXT)''')
-        cursor.execute('''CREATE TABLE IF NOT EXISTS votes
-                          (id SERIAL PRIMARY KEY, 
-                           post_id INTEGER REFERENCES posts(id) ON DELETE CASCADE, 
-                           user_id INTEGER REFERENCES users(id) ON DELETE CASCADE, 
-                           vote INTEGER, 
-                           UNIQUE(post_id, user_id))''')
-        db.commit()
-        cursor.close()
-
-init_db()
+# Initialize Redis connection
+redis = Redis(
+    url=os.getenv('UPSTASH_REDIS_REST_URL'),
+    token=os.getenv('UPSTASH_REDIS_REST_TOKEN')
+)
 
 @app.before_request
 def before_request():
-    g.db = get_db()
-
-@app.teardown_request
-def teardown_request(exception):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    g.redis = redis
 
 @app.route('/')
 def index():
     if 'username' in session:
-        posts = g.db.execute('''
-            SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes
-            FROM posts JOIN users ON posts.user_id = users.id
-            ORDER BY (posts.upvotes - posts.downvotes) DESC
-        ''').fetchall()
-        user_votes = {row[0]: row[1] for row in g.db.execute('SELECT post_id, vote FROM votes WHERE user_id = ?', (session['user_id'],)).fetchall()}
+        posts = g.redis.lrange('posts', 0, -1)
+        posts = [eval(post) for post in posts]
+        posts = sorted(posts, key=lambda x: x['upvotes'] - x['downvotes'], reverse=True)
+        user_votes = {int(post_id): int(vote) for post_id, vote in g.redis.hgetall(f'user:{session["user_id"]}:votes').items()}
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
 
@@ -70,10 +31,10 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        user = g.db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-        if user and check_password_hash(user[2], password):
+        user = g.redis.hgetall(f'user:{username}')
+        if user and check_password_hash(user['password'], password):
             session['username'] = username
-            session['user_id'] = user[0]
+            session['user_id'] = user['id']
             if username == 'admin':
                 session['admin'] = True
             return redirect(url_for('index'))
@@ -91,16 +52,15 @@ def register():
             flash('Password must be at least 8 characters long', 'error')
         else:
             hashed_password = generate_password_hash(password)
-            try:
-                g.db.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashed_password))
-                g.db.commit()
+            user_id = g.redis.incr('user:id')
+            user = {'id': user_id, 'username': username, 'password': hashed_password}
+            if g.redis.hsetnx(f'user:{username}', mapping=user):
                 session['username'] = username
-                user = g.db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-                session['user_id'] = user[0]
+                session['user_id'] = user_id
                 if username == 'admin':
                     session['admin'] = True
                 return redirect(url_for('index'))
-            except psycopg2.IntegrityError:
+            else:
                 flash('Username already exists', 'error')
     return render_template('register.html')
 
@@ -116,12 +76,11 @@ def profile():
         if new_username and len(new_username) < 3:
             flash('Username must be at least 3 characters long', 'error')
         elif new_username:
-            try:
-                g.db.execute('UPDATE users SET username = ? WHERE id = ?', (new_username, user_id))
-                g.db.commit()
+            if g.redis.hsetnx(f'user:{new_username}', mapping=g.redis.hgetall(f'user:{session["username"]}')):
+                g.redis.delete(f'user:{session["username"]}')
                 session['username'] = new_username
                 flash('Username updated successfully', 'success')
-            except psycopg2.IntegrityError:
+            else:
                 flash('Username already exists', 'error')
         if new_password:
             if len(new_password) < 8:
@@ -130,10 +89,9 @@ def profile():
                 flash('Passwords do not match', 'error')
             else:
                 hashed_password = generate_password_hash(new_password)
-                g.db.execute('UPDATE users SET password = ? WHERE id = ?', (hashed_password, user_id))
-                g.db.commit()
+                g.redis.hset(f'user:{session["username"]}', 'password', hashed_password)
                 flash('Password updated successfully', 'success')
-    user_posts = g.db.execute('SELECT id, content FROM posts WHERE user_id = ?', (user_id,)).fetchall()
+    user_posts = [eval(post) for post in g.redis.lrange(f'user:{user_id}:posts', 0, -1)]
     return render_template('profile.html', posts=user_posts)
 
 @app.route('/create_post', methods=['GET', 'POST'])
@@ -146,8 +104,10 @@ def create_post():
             flash('Post content exceeds 64 words limit', 'error')
         else:
             user_id = session['user_id']
-            g.db.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)', (user_id, content))
-            g.db.commit()
+            post_id = g.redis.incr('post:id')
+            post = {'id': post_id, 'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0}
+            g.redis.lpush('posts', str(post))
+            g.redis.lpush(f'user:{user_id}:posts', str(post))
             flash('Post created successfully', 'success')
             return redirect(url_for('index'))
     return render_template('create_post.html')
@@ -157,12 +117,15 @@ def delete_post(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    post = g.db.execute('SELECT * FROM posts WHERE id = ? AND user_id = ?', (post_id, user_id)).fetchone()
+    posts = [eval(post) for post in g.redis.lrange('posts', 0, -1)]
+    post = next((post for post in posts if post['id'] == post_id and post['user_id'] == user_id), None)
     if post:
-        g.db.execute('DELETE FROM posts WHERE id = ?', (post_id,))
-        g.db.execute('DELETE FROM comments WHERE post_id = ?', (post_id,))
-        g.db.execute('DELETE FROM votes WHERE post_id = ?', (post_id,))
-        g.db.commit()
+        g.redis.lrem('posts', 0, str(post))
+        g.redis.lrem(f'user:{user_id}:posts', 0, str(post))
+        comments = g.redis.lrange(f'post:{post_id}:comments', 0, -1)
+        for comment in comments:
+            g.redis.delete(f'comment:{comment}')
+        g.redis.delete(f'post:{post_id}:comments')
         flash('Post deleted successfully', 'success')
     return redirect(url_for('profile'))
 
@@ -171,27 +134,30 @@ def vote(post_id, vote):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    existing_vote = g.db.execute('SELECT * FROM votes WHERE post_id = ? AND user_id = ?', (post_id, user_id)).fetchone()
+    post = eval(g.redis.lindex('posts', post_id - 1))
+    existing_vote = g.redis.hget(f'user:{user_id}:votes', post_id)
     if existing_vote:
-        if existing_vote[3] == vote:
-            g.db.execute('DELETE FROM votes WHERE post_id = ? AND user_id = ?', (post_id, user_id))
+        if int(existing_vote) == vote:
+            g.redis.hdel(f'user:{user_id}:votes', post_id)
             if vote == 1:
-                g.db.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = ?', (post_id,))
+                post['upvotes'] -= 1
             else:
-                g.db.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = ?', (post_id,))
+                post['downvotes'] -= 1
         else:
-            g.db.execute('UPDATE votes SET vote = ? WHERE post_id = ? AND user_id = ?', (vote, post_id, user_id))
+            g.redis.hset(f'user:{user_id}:votes', post_id, vote)
             if vote == 1:
-                g.db.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = ?', (post_id,))
+                post['upvotes'] += 1
+                post['downvotes'] -= 1
             else:
-                g.db.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = ?', (post_id,))
+                post['upvotes'] -= 1
+                post['downvotes'] += 1
     else:
-        g.db.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (?, ?, ?)', (post_id, user_id, vote))
+        g.redis.hset(f'user:{user_id}:votes', post_id, vote)
         if vote == 1:
-            g.db.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = ?', (post_id,))
+            post['upvotes'] += 1
         else:
-            g.db.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = ?', (post_id,))
-    g.db.commit()
+            post['downvotes'] += 1
+    g.redis.lset('posts', post_id - 1, str(post))
     return redirect(url_for('index'))
 
 @app.route('/post/<int:post_id>', methods=['GET', 'POST'])
@@ -200,27 +166,73 @@ def view_post(post_id):
         return redirect(url_for('login'))
     if request.method == 'POST':
         comment_content = request.form['comment']
-        user_id = session['user_id']
-        g.db.execute('INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)', (post_id, user_id, comment_content))
-        g.db.commit()
-        flash('Comment added successfully', 'success')
-    post = g.db.execute('''
-        SELECT posts.id, users.username, posts.content, posts.upvotes, posts.downvotes
-        FROM posts JOIN users ON posts.user_id = users.id
-        WHERE posts.id = ?
-    ''', (post_id,)).fetchone()
-    comments = g.db.execute('''
-        SELECT comments.id, users.username, comments.content
-        FROM comments JOIN users ON comments.user_id = users.id
-        WHERE comments.post_id = ?
-    ''', (post_id,)).fetchall()
-    user_vote = g.db.execute('SELECT vote FROM votes WHERE post_id = ? AND user_id = ?', (post_id, session['user_id'])).fetchone()
-    return render_template('view_post.html', post=post, comments=comments, user_vote=user_vote[0] if user_vote else None)
+        if comment_content:
+            user_id = session['user_id']
+            comment_id = g.redis.incr('comment:id')
+            comment = {'id': comment_id, 'post_id': post_id, 'user_id': user_id, 'content': comment_content}
+            g.redis.lpush(f'post:{post_id}:comments', str(comment))
+            flash('Comment added successfully', 'success')
+    post = eval(g.redis.lindex('posts', post_id - 1))
+    comments = [eval(comment) for comment in g.redis.lrange(f'post:{post_id}:comments', 0, -1)]
+    user_votes = {int(post_id): int(vote) for post_id, vote in g.redis.hgetall(f'user:{session["user_id"]}:votes').items()}
+    return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
+
+@app.route('/delete_comment/<int:comment_id>')
+def delete_comment(comment_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    comment = eval(g.redis.get(f'comment:{comment_id}'))
+    if comment and comment['user_id'] == user_id:
+        g.redis.lrem(f'post:{comment["post_id"]}:comments', 0, str(comment))
+        g.redis.delete(f'comment:{comment_id}')
+        flash('Comment deleted successfully', 'success')
+    return redirect(url_for('view_post', post_id=comment['post_id']))
 
 @app.route('/logout')
 def logout():
-    session.clear()
-    return redirect(url_for('index'))
+    session.pop('username', None)
+    session.pop('user_id', None)
+    session.pop('admin', None)
+    return redirect(url_for('login'))
+
+@app.route('/admin')
+def admin():
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    users = [eval(user) for user in g.redis.lrange('users', 0, -1)]
+    posts = [eval(post) for post in g.redis.lrange('posts', 0, -1)]
+    return render_template('admin.html', users=users, posts=posts)
+
+@app.route('/delete_user/<int:user_id>')
+def delete_user(user_id):
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    user = eval(g.redis.get(f'user:{user_id}'))
+    if user:
+        g.redis.delete(f'user:{user_id}')
+        g.redis.lrem('users', 0, str(user))
+        flash('User deleted successfully', 'success')
+    return redirect(url_for('admin'))
+
+@app.route('/admin_delete_post/<int:post_id>')
+def admin_delete_post(post_id):
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    post = eval(g.redis.lindex('posts', post_id - 1))
+    if post:
+        g.redis.lrem('posts', 0, str(post))
+        comments = g.redis.lrange(f'post:{post_id}:comments', 0, -1)
+        for comment in comments:
+            g.redis.delete(f'comment:{comment}')
+        g.redis.delete(f'post:{post_id}:comments')
+        flash('Post deleted successfully', 'success')
+    return redirect(url_for('admin'))
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    print(f"Error: {e}")
+    return str(e), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0')
