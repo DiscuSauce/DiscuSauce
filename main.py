@@ -11,17 +11,26 @@ redis_port = 38686
 redis_password = '61ec78bf004a425a8eeb3555735646d7'
 
 # Create Redis connection
-r = redis.StrictRedis(
-    host=redis_host,
-    port=redis_port,
-    password=redis_password,
-    ssl=True,
-    decode_responses=True
-)
+try:
+    r = redis.StrictRedis(
+        host=redis_host,
+        port=redis_port,
+        password=redis_password,
+        ssl=True,
+        decode_responses=True
+    )
+    # Test Redis connection
+    r.ping()
+    print("Connected to Redis successfully!")
+except redis.ConnectionError as e:
+    print(f"Redis connection failed: {e}")
 
 def init_redis():
-    r.flushdb()  # Clears the Redis database
-    print("Redis database initialized.")
+    try:
+        r.flushdb()  # Clears the Redis database
+        print("Redis database initialized.")
+    except Exception as e:
+        print(f"Failed to initialize Redis: {e}")
 
 init_redis()
 
@@ -181,24 +190,19 @@ def vote(post_id, vote):
             r.hincrby(f'post:{post_id}', 'downvotes', 1)
     return redirect(url_for('index'))
 
-@app.route('/post/<int:post_id>', methods=['GET', 'POST'])
+@app.route('/view_post/<int:post_id>')
 def view_post(post_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    if request.method == 'POST':
-        comment_content = request.form['comment']
-        if comment_content:
-            user_id = session['user_id']
-            comment_id = r.incr('comment:id')
-            r.hmset(f'comment:{comment_id}', {'post_id': post_id, 'user_id': user_id, 'content': comment_content})
-            r.sadd(f'post:{post_id}:comments', comment_id)
-            flash('Comment added successfully', 'success')
     post = r.hgetall(f'post:{post_id}')
+    if not post:
+        return 'Post not found', 404
     post['id'] = post_id
     post['username'] = r.hget(f'user:{post["user_id"]}', 'username')
-    comments = [r.hgetall(f'comment:{comment_id}') for comment_id in r.smembers(f'post:{post_id}:comments')]
-    for comment in comments:
+    comments = []
+    for comment_id in r.smembers(f'post:{post_id}:comments'):
+        comment = r.hgetall(f'comment:{comment_id}')
+        comment['id'] = comment_id
         comment['username'] = r.hget(f'user:{comment["user_id"]}', 'username')
+        comments.append(comment)
     user_votes = {post_id: r.hget(f'vote:{post_id}:{session["user_id"]}', 'vote') for post_id in r.smembers('posts')}
     return render_template('view_post.html', post=post, comments=comments, user_votes=user_votes, username=session.get('username'))
 
