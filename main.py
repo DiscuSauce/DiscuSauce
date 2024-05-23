@@ -159,7 +159,7 @@ def vote(post_id, vote):
     
     user_id = session['user_id']
     existing_vote = r.hget(f'vote:{post_id}:{user_id}', 'vote')
-    
+
     if existing_vote:
         if int(existing_vote) == vote:
             r.delete(f'vote:{post_id}:{user_id}')
@@ -206,66 +206,66 @@ def view_post(post_id):
 
 @app.route('/delete_comment/<int:comment_id>')
 def delete_comment(comment_id):
-if 'username' not in session:
-return redirect(url_for('login'))
-user_id = session['user_id']
-comment = r.hgetall(f'comment:{comment_id}')
-if comment and comment['user_id'] == str(user_id):
-r.delete(f'comment:{comment_id}')
-r.srem(f'post:{comment["post_id"]}:comments', comment_id)
-flash('Comment deleted successfully', 'success')
-return redirect(url_for('view_post', post_id=comment['post_id']))
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    user_id = session['user_id']
+    comment = r.hgetall(f'comment:{comment_id}')
+    if comment and comment['user_id'] == str(user_id):
+        r.delete(f'comment:{comment_id}')
+        r.srem(f'post:{comment["post_id"]}:comments', comment_id)
+        flash('Comment deleted successfully', 'success')
+    return redirect(url_for('view_post', post_id=comment['post_id']))
 
 @app.route('/logout')
 def logout():
-session.pop('username', None)
-session.pop('user_id', None)
-session.pop('admin', None)
-return redirect(url_for('login'))
+    session.pop('username', None)
+    session.pop('user_id', None)
+    session.pop('admin', None)
+    return redirect(url_for('login'))
 
-@app.route('/create_comment/int:post_id', methods=['POST'])
+@app.route('/create_comment/<int:post_id>', methods=['POST'])
 def create_comment(post_id):
-if 'username' not in session:
-return redirect(url_for('login'))
-content = request.form['comment']
-user_id = session['user_id']
-comment_id = r.incr('comment:id')
-r.hmset(f'comment:{comment_id}', {'post_id': post_id, 'user_id': user_id, 'content': content})
-r.sadd(f'post:{post_id}:comments', comment_id)
-flash('Comment added successfully', 'success')
-return redirect(url_for('view_post', post_id=post_id))
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    content = request.form['comment']
+    user_id = session['user_id']
+    comment_id = r.incr('comment:id')
+    r.hmset(f'comment:{comment_id}', {'post_id': post_id, 'user_id': user_id, 'content': content})
+    r.sadd(f'post:{post_id}:comments', comment_id)
+    flash('Comment added successfully', 'success')
+    return redirect(url_for('view_post', post_id=post_id))
 
 @app.route('/admin')
 def admin():
-if 'username' not in session or not session.get('admin'):
-return redirect(url_for('login'))
-users = [{'id': user_id, 'username': r.hget(f'user:{user_id}', 'username')} for user_id in r.keys('user:*') if user_id != 'user:id']
-posts = [{'id': post_id, 'content': r.hget(f'post:{post_id}', 'content')} for post_id in r.smembers('posts')]
-return render_template('admin.html', users=users, posts=posts)
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    users = [{'id': user_id, 'username': r.hget(f'user:{user_id}', 'username')} for user_id in r.keys('user:*') if user_id != 'user:id']
+    posts = [{'id': post_id, 'content': r.hget(f'post:{post_id}', 'content')} for post_id in r.smembers('posts')]
+    return render_template('admin.html', users=users, posts=posts)
 
-@app.route('/delete_user/int:user_id')
+@app.route('/delete_user/<int:user_id>')
 def delete_user(user_id):
-if 'username' not in session or not session.get('admin'):
-return redirect(url_for('login'))
-username = r.hget(f'user:{user_id}', 'username')
-r.delete(f'username:{username}')
-r.delete(f'user:{user_id}')
-flash('User deleted successfully', 'success')
-return redirect(url_for('admin'))
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    username = r.hget(f'user:{user_id}', 'username')
+    r.delete(f'username:{username}')
+    r.delete(f'user:{user_id}')
+    flash('User deleted successfully', 'success')
+    return redirect(url_for('admin'))
 
-@app.route('/admin_delete_post/int:post_id')
+@app.route('/admin_delete_post/<int:post_id>')
 def admin_delete_post(post_id):
-if 'username' not in session or not session.get('admin'):
-return redirect(url_for('login'))
-r.delete(f'post:{post_id}')
-r.srem('posts', post_id)
-flash('Post deleted successfully', 'success')
-return redirect(url_for('admin'))
+    if 'username' not in session or not session.get('admin'):
+        return redirect(url_for('login'))
+    r.delete(f'post:{post_id}')
+    r.srem('posts', post_id)
+    flash('Post deleted successfully', 'success')
+    return redirect(url_for('admin'))
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-print(f"Error: {e}")
-return str(e), 500
+    print(f"Error: {e}")
+    return str(e), 500
 
-if name == 'main':
-app.run(debug=True, host='0.0.0.0')
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0')
