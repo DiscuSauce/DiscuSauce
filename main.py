@@ -1,73 +1,119 @@
 import os
-import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
 import html
+import psycopg2
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'секретный_ключ_здесь')
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATABASE = os.path.join(BASE_DIR, 'main.py.db')
+app.secret_key = os.getenv('SECRET_KEY', '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci')
+
+# PostgreSQL configuration
+POSTGRES_USER = os.getenv('POSTGRES_USER', 'default')
+POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', '80qhdfubDyWs')
+POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'ep-lucky-breeze-a22r9wts-pooler.eu-central-1.aws.neon.tech')
+POSTGRES_DB = os.getenv('POSTGRES_DB', 'verceldb')
+POSTGRES_PORT = os.getenv('POSTGRES_PORT', '5432')
 
 def get_db_connection():
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
-        g.db.row_factory = sqlite3.Row
+        g.db = psycopg2.connect(
+            user=POSTGRES_USER,
+            password=POSTGRES_PASSWORD,
+            host=POSTGRES_HOST,
+            database=POSTGRES_DB,
+            port=POSTGRES_PORT
+        )
     return g.db
-
-def close_db_connection(exception):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
 
 def init_db():
     db = get_db_connection()
-    with app.open_resource('schema.sql') as f:
-        db.executescript(f.read().decode('utf8'))
+    cursor = db.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) NOT NULL UNIQUE,
+            password VARCHAR(255) NOT NULL
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS posts (
+            id SERIAL PRIMARY KEY,
+            user_id INT NOT NULL,
+            content TEXT NOT NULL,
+            upvotes INT DEFAULT 0,
+            downvotes INT DEFAULT 0,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS comments (
+            id SERIAL PRIMARY KEY,
+            post_id INT NOT NULL,
+            user_id INT NOT NULL,
+            content TEXT NOT NULL,
+            FOREIGN KEY (post_id) REFERENCES posts(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS votes (
+            id SERIAL PRIMARY KEY,
+            post_id INT NOT NULL,
+            user_id INT NOT NULL,
+            vote INT NOT NULL,
+            FOREIGN KEY (post_id) REFERENCES posts(id),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    ''')
     db.commit()
+    cursor.close()
 
-@app.before_first_request
-def initialize():
+@app.before_request
+def before_request():
+    g.db = get_db_connection()
     init_db()
 
-@app.teardown_appcontext
-def teardown_db(exception):
-    close_db_connection(exception)
+@app.teardown_request
+def teardown_request(exception):
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 def sanitize_input(input):
     return html.escape(input)
 
 def get_user_id(username):
     cursor = get_db_connection().cursor()
-    cursor.execute('SELECT id FROM users WHERE username = ?', (username,))
+    cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
     user = cursor.fetchone()
     cursor.close()
-    return user['id'] if user else None
+    return user[0] if user else None
 
 def get_user(user_id):
     cursor = get_db_connection().cursor()
-    cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
+    cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
     user = cursor.fetchone()
     cursor.close()
-    return {'id': user['id'], 'username': user['username'], 'password': user['password']} if user else None
+    return {'id': user[0], 'username': user[1], 'password': user[2]} if user else None
 
 def create_user(username, password):
     db = get_db_connection()
     cursor = db.cursor()
     hashed_password = generate_password_hash(password)
-    cursor.execute('INSERT INTO users (username, password) VALUES (?, ?)', (username, hashed_password))
+    cursor.execute('INSERT INTO users (username, password) VALUES (%s, %s)', (username, hashed_password))
     db.commit()
-    user_id = cursor.lastrowid
+    cursor.execute('SELECT lastval()')
+    user_id = cursor.fetchone()[0]
     cursor.close()
     return user_id
 
 def create_post(user_id, content):
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute("INSERT INTO posts (user_id, content) VALUES (?, ?)", (user_id, content))
-    db.commit()
-    post_id = cursor.lastrowid
+    cursor = g.db.cursor()
+    cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
+    g.db.commit()
+    cursor.execute('SELECT lastval()')
+    post_id = cursor.fetchone()[0]
     cursor.close()
     return post_id
 
@@ -83,12 +129,11 @@ def is_safe_url(target):
 def index():
     if 'username' in session:
         db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY (upvotes - downvotes) DESC')
-        posts = cursor.fetchall()
-        cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = ?', (session['user_id'],))
-        user_votes = {vote['post_id']: vote['vote'] for vote in cursor.fetchall()}
-        cursor.close()
+        with db.cursor() as cursor:
+            cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY (upvotes - downvotes) DESC')
+            posts = cursor.fetchall()
+            cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = %s', (session['user_id'],))
+            user_votes = {vote['post_id']: vote['vote'] for vote in cursor.fetchall()}
         db.close()
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
@@ -148,7 +193,7 @@ def profile():
             if get_user_id(new_username):
                 flash_message('error', 'Username already exists')
             else:
-                cursor.execute('UPDATE users SET username = ? WHERE id = ?', (new_username, user_id))
+                cursor.execute('UPDATE users SET username = %s WHERE id = %s', (new_username, user_id))
                 session['username'] = new_username
                 flash_message('success', 'Username updated successfully')
         if new_password:
@@ -158,119 +203,97 @@ def profile():
                 flash_message('error', 'Passwords do not match')
             else:
                 hashed_password = generate_password_hash(new_password)
-                cursor.execute('UPDATE users SET password = ? WHERE id = ?', (hashed_password, user_id))
+                cursor.execute('UPDATE users SET password = %s WHERE id = %s', (hashed_password, user_id))
                 flash_message('success', 'Password updated successfully')
         db.commit()
-    cursor.execute('SELECT * FROM posts WHERE user_id = ?', (user_id,))
-    user_posts = cursor.fetchall()
+    cursor.execute('SELECT username FROM users WHERE id = %s', (user_id,))
+    username = cursor.fetchone()[0]
     cursor.close()
-    db.close()
-    return render_template('profile.html', posts=user_posts)
+    return render_template('profile.html', username=username)
 
-@app.route('/create_post', methods=['GET', 'POST'])
-def create_post():
+@app.route('/create', methods=['GET', 'POST'])
+def create():
     if 'username' not in session:
         return redirect(url_for('login'))
     if request.method == 'POST':
         content = request.form['content']
-        if len(content.split()) > 64:
-            flash_message('error', 'Post content exceeds 64 words limit')
-        else:
-            user_id = session['user_id']
-            create_post(user_id, content)
-            flash_message('success', 'Post created successfully')
-            return redirect(url_for('index'))
-    return render_template('create_post.html')
+        content = sanitize_input(content)
+        create_post(session['user_id'], content)
+        return redirect(url_for('index'))
+    return render_template('create.html')
 
-@app.route('/delete_post/<int:post_id>')
-def delete_post(post_id):
+@app.route('/upvote/<int:post_id>', methods=['POST'])
+def upvote(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute('SELECT * FROM posts WHERE id = ? AND user_id = ?', (post_id, user_id))
-    post = cursor.fetchone()
-    if post:
-        cursor.execute('DELETE FROM comments WHERE post_id = ?', (post_id,))
-        cursor.execute('DELETE FROM posts WHERE id = ?', (post_id,))
-        db.commit()
-        flash_message('success', 'Post deleted successfully')
-    else:
-        flash_message('error', 'You are not authorized to delete this post')
-    cursor.close()
-    db.close()
-    return redirect(url_for('profile'))
-
-@app.route('/vote/<int:post_id>/<int:vote>')
-def vote(post_id, vote):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    user_id = session['user_id']
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute('SELECT vote FROM votes WHERE post_id = ? AND user_id = ?', (post_id, user_id))
-    existing_vote = cursor.fetchone()
-    if existing_vote:
-        if existing_vote['vote'] == vote:
-            cursor.execute('DELETE FROM votes WHERE post_id = ? AND user_id = ?', (post_id, user_id))
-            if vote == 1:
-                cursor.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = ?', (post_id,))
-            else:
-                cursor.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = ?', (post_id,))
+    cursor = g.db.cursor()
+    cursor.execute('SELECT * FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
+    vote = cursor.fetchone()
+    if vote:
+        if vote[3] == 1:
+            cursor.execute('DELETE FROM votes WHERE id = %s', (vote[0],))
+            cursor.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = %s', (post_id,))
         else:
-            cursor.execute('UPDATE votes SET vote = ? WHERE post_id = ? AND user_id = ?', (vote, post_id, user_id))
-            if vote == 1:
-                cursor.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = ?', (post_id,))
-            else:
-                cursor.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = ?', (post_id,))
+            cursor.execute('UPDATE votes SET vote = 1 WHERE id = %s', (vote[0],))
+            cursor.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = %s', (post_id,))
     else:
-        cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (?, ?, ?)', (post_id, user_id, vote))
-        if vote == 1:
-            cursor.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = ?', (post_id,))
-        else:
-            cursor.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = ?', (post_id,))
-    db.commit()
+        cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, 1))
+        cursor.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = %s', (post_id,))
+    g.db.commit()
     cursor.close()
-    db.close()
     return redirect(url_for('index'))
 
-@app.route('/delete_comment/<int:comment_id>')
-def delete_comment(comment_id):
+@app.route('/downvote/<int:post_id>', methods=['POST'])
+def downvote(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute('SELECT * FROM comments WHERE id = ? AND user_id = ?', (comment_id, user_id))
-    comment = cursor.fetchone()
-    if comment:
-        cursor.execute('DELETE FROM comments WHERE id = ?', (comment_id,))
-        db.commit()
-        flash_message('success', 'Comment deleted successfully')
+    cursor = g.db.cursor()
+    cursor.execute('SELECT * FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
+    vote = cursor.fetchone()
+    if vote:
+        if vote[3] == -1:
+            cursor.execute('DELETE FROM votes WHERE id = %s', (vote[0],))
+            cursor.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = %s', (post_id,))
+        else:
+            cursor.execute('UPDATE votes SET vote = -1 WHERE id = %s', (vote[0],))
+            cursor.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = %s', (post_id,))
     else:
-        flash_message('error', 'You are not authorized to delete this comment')
+        cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, -1))
+        cursor.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = %s', (post_id,))
+    g.db.commit()
     cursor.close()
-    db.close()
-    return redirect(url_for('profile'))
+    return redirect(url_for('index'))
+
+@app.route('/delete/<int:post_id>', methods=['POST'])
+def delete(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    cursor = g.db.cursor()
+    cursor.execute('DELETE FROM comments WHERE post_id = %s', (post_id,))
+    cursor.execute('DELETE FROM votes WHERE post_id = %s', (post_id,))
+    cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
+    g.db.commit()
+    cursor.close()
+    return redirect(url_for('index'))
 
 @app.route('/comment/<int:post_id>', methods=['POST'])
 def comment(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_id = session['user_id']
-    content = sanitize_input(request.form['content'])
-    if len(content) > 500:
-        flash_message('error', 'Comment content exceeds 500 characters limit')
-    else:
-        db = get_db_connection()
-        cursor = db.cursor()
-        cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)', (post_id, user_id, content))
-        db.commit()
-        cursor.close()
-        db.close()
-        flash_message('success', 'Comment added successfully')
+    content = request.form['content']
+    content = sanitize_input(content)
+    cursor = g.db.cursor()
+    cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, session['user_id'], content))
+    g.db.commit()
+    cursor.close()
+    return redirect(url_for('index'))
+
+@app.route('/logout')
+def logout():
+    session.clear()
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run()
