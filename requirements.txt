@@ -1,3 +1,6 @@
 Flask
-psycopg2
-Werkzeug
+Flask-SQLAlchemy
+Flask-Bcrypt
+Flask-WTF
+Flask-Session
+Flask-Env
