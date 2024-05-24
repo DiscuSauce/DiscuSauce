@@ -276,8 +276,12 @@ def view_post(post_id):
     post = g.cursor.fetchone()
     if not post:
         return 'Post not found', 404
+
     g.cursor.execute('SELECT comments.*, users.username FROM comments JOIN users ON comments.user_id = users.id WHERE post_id = %s', (post_id,))
     comments = g.cursor.fetchall()
+    if not comments:
+        comments = []  # Пустой список, если нет комментариев
+
     return render_template('view_post.html', post=post, comments=comments)
 
 @app.route('/logout')
