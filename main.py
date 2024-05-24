@@ -6,7 +6,7 @@ from urllib.parse import urlparse, urljoin
 import html
 
 app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci')
+app.secret_key = os.getenv('SECRET_KEY', 'секретный_ключ_здесь')
 DATABASE = 'app.db'
 
 def get_db_connection():
