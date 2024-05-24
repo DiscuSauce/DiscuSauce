@@ -300,8 +300,7 @@ def create_comment(post_id):
     g.cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, user_id, content))
     g.db.commit()
     flash('Comment added successfully', 'success')
-    return redirect(url_for('view_post', post_id=post_id)
-
+    return redirect(url_for('view_post', post_id=post_id))
 
 @app.route('/admin')
 def admin():
