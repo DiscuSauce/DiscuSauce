@@ -3,23 +3,25 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
 import html
-import mysql.connector
+import psycopg2
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# MySQL configuration
-MYSQL_USER = os.getenv('MYSQL_USER', 'jck8kpiny0fmzh0u')
-MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', 'hllh8m1l605jp1is')
-MYSQL_HOST = os.getenv('MYSQL_HOST', 'm7wltxurw8d2n21q.cbetxkdyhwsb.us-east-1.rds.amazonaws.com')
-MYSQL_DB = os.getenv('MYSQL_DB', 'l8p7bk55le9p4st2')
+# PostgreSQL configuration
+POSTGRES_USER = os.getenv('POSTGRES_USER', 'szirpaekvdajlu')
+POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', '2919c09af5c341f7fdf44343be41fb562a22a77e68fb6b28c3310f38acafc8f0')
+POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'ec2-52-23-12-61.compute-1.amazonaws.com')
+POSTGRES_DB = os.getenv('POSTGRES_DB', 'd6sb633vs4llrl')
+POSTGRES_PORT = os.getenv('POSTGRES_PORT', '5432')
 
 def get_db_connection():
-    connection = mysql.connector.connect(
-        user=MYSQL_USER,
-        password=MYSQL_PASSWORD,
-        host=MYSQL_HOST,
-        database=MYSQL_DB
+    connection = psycopg2.connect(
+        user=POSTGRES_USER,
+        password=POSTGRES_PASSWORD,
+        host=POSTGRES_HOST,
+        database=POSTGRES_DB,
+        port=POSTGRES_PORT
     )
     return connection
 
@@ -28,14 +30,14 @@ def init_db():
     cursor = db.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             username VARCHAR(50) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL
         )
     ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS posts (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             user_id INT NOT NULL,
             content TEXT NOT NULL,
             upvotes INT DEFAULT 0,
@@ -45,7 +47,7 @@ def init_db():
     ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS comments (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             post_id INT NOT NULL,
             user_id INT NOT NULL,
             content TEXT NOT NULL,
@@ -55,7 +57,7 @@ def init_db():
     ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS votes (
-            id INT AUTO_INCREMENT PRIMARY KEY,
+            id SERIAL PRIMARY KEY,
             post_id INT NOT NULL,
             user_id INT NOT NULL,
             vote INT NOT NULL,
@@ -73,7 +75,7 @@ def before_request():
     g.cursor = g.db.cursor(dictionary=True)
 
     # Check if tables exist, if not, initialize the database
-    g.cursor.execute("SHOW TABLES")
+    g.cursor.execute("SELECT * FROM information_schema.tables WHERE table_name = 'users'")
     tables = g.cursor.fetchall()
     if not tables:
         init_db()
@@ -102,13 +104,11 @@ def create_user(username, password):
     return g.cursor.lastrowid
 
 def create_post(user_id, content):
-    db = get_db_connection()
-    cursor = db.cursor()
+    cursor = g.db.cursor()
     cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
     post_id = cursor.lastrowid
-    db.commit()
+    g.db.commit()
     cursor.close()
-    db.close()
     return post_id
 
 def flash_message(category, message):
