@@ -72,7 +72,7 @@ def init_db():
 @app.before_request
 def before_request():
     g.db = get_db_connection()
-    g.cursor = g.db.cursor(dictionary=True)
+    g.cursor = g.db.cursor()
 
     # Check if tables exist, if not, initialize the database
     g.cursor.execute("SELECT * FROM information_schema.tables WHERE table_name = 'users'")
