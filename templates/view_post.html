@@ -18,12 +18,12 @@
 <h3>Comments</h3>
 <ul class="comment-list">
     {% for comment in comments %}
-    <li class="comment">
-        <p><strong>{{ comment['username'] }}:</strong> {{ comment['content'] }}</p>
-        {% if 'username' in session and session['username'] == comment['username'] %}
-            <a href="{{ url_for('delete_comment', comment_id=comment['id']) }}">Delete</a>
-        {% endif %}
-    </li>
+        <li class="comment">
+            <p><strong>{{ comment['username'] }}:</strong> {{ comment['content'] }}</p>
+            {% if 'username' in session and session['username'] == comment['username'] %}
+                <a href="{{ url_for('delete_comment', comment_id=comment['id']) }}">Delete</a>
+            {% endif %}
+        </li>
     {% endfor %}
 </ul>
 
