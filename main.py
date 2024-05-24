@@ -93,7 +93,7 @@ def sanitize_input(input):
 def get_user_id(username):
     g.cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
     user = g.cursor.fetchone()
-    return user['id'] if user else None
+    return user[0] if user else None
 
 def get_user(user_id):
     g.cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
