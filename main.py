@@ -231,6 +231,9 @@ def delete_post(post_id):
     g.cursor.execute('SELECT * FROM posts WHERE id = %s AND user_id = %s', (post_id, user_id))
     post = g.cursor.fetchone()
     if post:
+        # Удаляем все комментарии, связанные с этим постом
+        g.cursor.execute('DELETE FROM comments WHERE post_id = %s', (post_id,))
+        # Теперь удаляем сам пост
         g.cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
         g.db.commit()
         flash_message('success', 'Post deleted successfully')
