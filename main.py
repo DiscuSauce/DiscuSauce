@@ -7,7 +7,8 @@ import html
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', 'секретный_ключ_здесь')
-DATABASE = 'app.db'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATABASE = os.path.join(BASE_DIR, 'main.py.db')
 
 def get_db_connection():
     if 'db' not in g:
