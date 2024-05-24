@@ -82,8 +82,10 @@ def before_request():
 
 @app.teardown_request
 def teardown_request(exception):
-    g.cursor.close()
-    g.db.close()
+    if hasattr(g, 'cursor'):
+        g.cursor.close()
+    if hasattr(g, 'db'):
+        g.db.close()
 
 def sanitize_input(input):
     return html.escape(input)
