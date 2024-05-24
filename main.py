@@ -211,7 +211,7 @@ def create_post():
         if len(content.split()) > 64:
             flash_message('error', 'Post content exceeds 64 words limit')
         else:
-            user_id = session['user_id']
+            user_id = session['user_id']  # Получаем user_id из сессии пользователя
             create_post_in_db(user_id, content)
             flash_message('success', 'Post created successfully')
             return redirect(url_for('index'))
