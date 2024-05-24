@@ -126,10 +126,17 @@ def is_safe_url(target):
 @app.route('/')
 def index():
     if 'username' in session:
-        g.cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY (upvotes - downvotes) DESC')
-        posts = g.cursor.fetchall()
-        g.cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = %s', (session['user_id'],))
-        user_votes = {vote['post_id']: vote['vote'] for vote in g.cursor.fetchall()}
+        # Get the database connection
+        db = get_db_connection()
+        # Create a cursor within the connection context
+        with db.cursor() as cursor:
+            # Execute the SQL queries using the cursor
+            cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY (upvotes - downvotes) DESC')
+            posts = cursor.fetchall()
+            cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = %s', (session['user_id'],))
+            user_votes = {vote['post_id']: vote['vote'] for vote in cursor.fetchall()}
+        # Don't forget to close the database connection
+        db.close()
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
 
