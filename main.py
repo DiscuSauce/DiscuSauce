@@ -1,45 +1,56 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
+from urllib.parse import urlparse, urljoin
 import html
 import rethinkdb as r
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# RethinkDB Cloud configuration
+# RethinkDB configuration
 RETHINKDB_NAME = os.getenv('RETHINKDB_NAME', '9f37fa67-f9a2-4155-83bb-75f33d350a54')
 RETHINKDB_USERNAME = os.getenv('RETHINKDB_USERNAME', '9f37fa67-f9a2-4155-83bb-75f33d350a54')
 RETHINKDB_PASSWORD = os.getenv('RETHINKDB_PASSWORD', '610ef3d10b73e06d44401145b45ca8f5deaf477c')
 RETHINKDB_HOST = os.getenv('RETHINKDB_HOST', '9f37fa67-f9a2-4155-83bb-75f33d350a54.db.rdb.rethinkdb.cloud')
 RETHINKDB_PORT = os.getenv('RETHINKDB_PORT', 28015)
 
-r.connect(host=RETHINKDB_HOST, port=RETHINKDB_PORT, user=RETHINKDB_USERNAME, password=RETHINKDB_PASSWORD, db=RETHINKDB_NAME).repl()
+def get_db_connection():
+    if 'db' not in g:
+        g.db = r.connect(
+            host=RETHINKDB_HOST,
+            port=RETHINKDB_PORT,
+            db=RETHINKDB_NAME,
+            user=RETHINKDB_USERNAME,
+            password=RETHINKDB_PASSWORD
+        )
+    return g.db
 
-# Initialize tables if not exist
 def init_db():
+    conn = get_db_connection()
     try:
-        r.db_create(RETHINKDB_NAME).run()
+        r.db_create(RETHINKDB_NAME).run(conn)
     except r.errors.RqlRuntimeError:
         pass
     
-    r.db(RETHINKDB_NAME).table_create('users').run()
-    r.db(RETHINKDB_NAME).table_create('posts').run()
-    r.db(RETHINKDB_NAME).table_create('comments').run()
-    r.db(RETHINKDB_NAME).table_create('votes').run()
+    try:
+        r.db(RETHINKDB_NAME).table_create('users').run(conn)
+        r.db(RETHINKDB_NAME).table_create('posts').run(conn)
+        r.db(RETHINKDB_NAME).table_create('comments').run(conn)
+        r.db(RETHINKDB_NAME).table_create('votes').run(conn)
+    except r.errors.RqlRuntimeError:
+        pass
 
 @app.before_request
 def before_request():
-    try:
-        g.conn = r.connect(host=RETHINKDB_HOST, port=RETHINKDB_PORT, user=RETHINKDB_USERNAME, password=RETHINKDB_PASSWORD, db=RETHINKDB_NAME)
-    except r.errors.RqlDriverError:
-        pass
+    g.db = get_db_connection()
     init_db()
 
 @app.teardown_request
 def teardown_request(exception):
-    if hasattr(g, 'conn'):
-        g.conn.close()
+    db = g.pop('db', None)
+    if db is not None:
+        db.close()
 
 def sanitize_input(input):
     return html.escape(input)
