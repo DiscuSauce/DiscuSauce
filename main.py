@@ -220,8 +220,19 @@ def create_post():
 def create_post_in_db(user_id, content):
     db = get_db_connection()
     cursor = db.cursor()
-    cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
-    db.commit()
+    
+    # Проверяем, существует ли user_id в таблице "users"
+    cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+    user_exists = cursor.fetchone()
+    
+    if user_exists:
+        # Если пользователь существует, выполняем вставку поста
+        cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
+        db.commit()
+        flash_message('success', 'Post created successfully')
+    else:
+        flash_message('error', 'User does not exist')
+    
     cursor.close()
     db.close()
 
