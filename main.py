@@ -91,11 +91,9 @@ def get_user_id(username):
     return user[0] if user else None
 
 def get_user(user_id):
-    cursor = get_db_connection().cursor()
-    cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
-    user = cursor.fetchone()
-    cursor.close()
-    return user
+    g.cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
+    user = g.cursor.fetchone()
+    return {'id': user[0], 'username': user[1], 'password': user[2]} if user else None
 
 def create_user(username, password):
     db = get_db_connection()
