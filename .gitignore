@@ -1,7 +1,6 @@
 *.pyc
 __pycache__/
 instance/
-.venv/
+.pytest_cache/
 .env
-*.sqlite3
 database.db
