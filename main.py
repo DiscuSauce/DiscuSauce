@@ -183,6 +183,8 @@ def profile():
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
+    db = get_db_connection()
+    cursor = db.cursor()
     if request.method == 'POST':
         new_username = request.form['new_username']
         new_password = request.form['new_password']
@@ -194,7 +196,7 @@ def profile():
                 flash_message('error', 'Username already exists')
             else:
                 old_username = session['username']
-                g.cursor.execute('UPDATE users SET username = %s WHERE id = %s', (new_username, user_id))
+                cursor.execute('UPDATE users SET username = %s WHERE id = %s', (new_username, user_id))
                 session['username'] = new_username
                 flash_message('success', 'Username updated successfully')
         if new_password:
@@ -204,11 +206,13 @@ def profile():
                 flash_message('error', 'Passwords do not match')
             else:
                 hashed_password = generate_password_hash(new_password)
-                g.cursor.execute('UPDATE users SET password = %s WHERE id = %s', (hashed_password, user_id))
+                cursor.execute('UPDATE users SET password = %s WHERE id = %s', (hashed_password, user_id))
                 flash_message('success', 'Password updated successfully')
-        g.db.commit()
-    g.cursor.execute('SELECT * FROM posts WHERE user_id = %s', (user_id,))
-    user_posts = g.cursor.fetchall()
+        db.commit()
+    cursor.execute('SELECT * FROM posts WHERE user_id = %s', (user_id,))
+    user_posts = cursor.fetchall()
+    cursor.close()
+    db.close()
     return render_template('profile.html', posts=user_posts)
 
 @app.route('/create_post', methods=['GET', 'POST'])
