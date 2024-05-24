@@ -1,84 +1,45 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
-from urllib.parse import urlparse, urljoin
 import html
-import psycopg2
+import rethinkdb as r
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
-# PostgreSQL configuration
-POSTGRES_USER = os.getenv('POSTGRES_USER', 'szirpaekvdajlu')
-POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', '2919c09af5c341f7fdf44343be41fb562a22a77e68fb6b28c3310f38acafc8f0')
-POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'ec2-52-23-12-61.compute-1.amazonaws.com')
-POSTGRES_DB = os.getenv('POSTGRES_DB', 'd6sb633vs4llrl')
-POSTGRES_PORT = os.getenv('POSTGRES_PORT', '5432')
+# RethinkDB Cloud configuration
+RETHINKDB_NAME = os.getenv('RETHINKDB_NAME', '9f37fa67-f9a2-4155-83bb-75f33d350a54')
+RETHINKDB_USERNAME = os.getenv('RETHINKDB_USERNAME', '9f37fa67-f9a2-4155-83bb-75f33d350a54')
+RETHINKDB_PASSWORD = os.getenv('RETHINKDB_PASSWORD', '610ef3d10b73e06d44401145b45ca8f5deaf477c')
+RETHINKDB_HOST = os.getenv('RETHINKDB_HOST', '9f37fa67-f9a2-4155-83bb-75f33d350a54.db.rdb.rethinkdb.cloud')
+RETHINKDB_PORT = os.getenv('RETHINKDB_PORT', 28015)
 
-def get_db_connection():
-    if 'db' not in g:
-        g.db = psycopg2.connect(
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
-            database=POSTGRES_DB,
-            port=POSTGRES_PORT
-        )
-    return g.db
+r.connect(host=RETHINKDB_HOST, port=RETHINKDB_PORT, user=RETHINKDB_USERNAME, password=RETHINKDB_PASSWORD, db=RETHINKDB_NAME).repl()
 
+# Initialize tables if not exist
 def init_db():
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username VARCHAR(50) NOT NULL UNIQUE,
-            password VARCHAR(255) NOT NULL
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS posts (
-            id SERIAL PRIMARY KEY,
-            user_id INT NOT NULL,
-            content TEXT NOT NULL,
-            upvotes INT DEFAULT 0,
-            downvotes INT DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS comments (
-            id SERIAL PRIMARY KEY,
-            post_id INT NOT NULL,
-            user_id INT NOT NULL,
-            content TEXT NOT NULL,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS votes (
-            id SERIAL PRIMARY KEY,
-            post_id INT NOT NULL,
-            user_id INT NOT NULL,
-            vote INT NOT NULL,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    db.commit()
-    cursor.close()
+    try:
+        r.db_create(RETHINKDB_NAME).run()
+    except r.errors.RqlRuntimeError:
+        pass
+    
+    r.db(RETHINKDB_NAME).table_create('users').run()
+    r.db(RETHINKDB_NAME).table_create('posts').run()
+    r.db(RETHINKDB_NAME).table_create('comments').run()
+    r.db(RETHINKDB_NAME).table_create('votes').run()
 
 @app.before_request
 def before_request():
-    g.db = get_db_connection()
+    try:
+        g.conn = r.connect(host=RETHINKDB_HOST, port=RETHINKDB_PORT, user=RETHINKDB_USERNAME, password=RETHINKDB_PASSWORD, db=RETHINKDB_NAME)
+    except r.errors.RqlDriverError:
+        pass
     init_db()
 
 @app.teardown_request
 def teardown_request(exception):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    if hasattr(g, 'conn'):
+        g.conn.close()
 
 def sanitize_input(input):
     return html.escape(input)
