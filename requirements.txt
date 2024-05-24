@@ -1,6 +1,3 @@
 Flask
-Flask-SQLAlchemy
-Flask-Bcrypt
-Flask-WTF
-Flask-Session
-Flask-Env
+psycopg2-binary
+Werkzeug
