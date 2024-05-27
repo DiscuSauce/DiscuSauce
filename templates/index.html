@@ -1,34 +1,31 @@
 {% extends "base.html" %}
-
-{% block title %}Top Posts{% endblock %}
-
+{% block title %}Home{% endblock %}
 {% block content %}
-    <h2>Top Posts</h2>
-    <div class="post-list">
+<h1>Welcome, {{ username }}!</h1>
+{% if posts %}
+    <ul class="posts">
         {% for post in posts %}
-            <div class="post">
-                <div class="post-header">
-                    <p class="author">{{ post['username'] }}</p>
-                    <div class="votes">
-                        <a href="{{ url_for('vote', post_id=post['id'], vote=1) }}" class="upvote {{ 'active' if user_votes.get(post['id']) == 1 else '' }}">
-                            <i class="fas fa-arrow-up"></i>
-                        </a>
-                        <span class="score">{{ post['upvotes'] - post['downvotes'] }}</span>
-                        <a href="{{ url_for('vote', post_id=post['id'], vote=0) }}" class="upvote {{ 'active' if user_votes.get(post['id']) == 0 else '' }}">
-                            <i class="fas fa-arrow-down"></i>
-                        </a>
-                    </div>
-                </div>
-                <div class="post-content">
-                    <p>{{ post['content'] }}</p>
-                </div>
-                <div class="post-footer">
-                    <a href="{{ url_for('view_post', post_id=post['id']) }}">Comments</a>
-                    {% if session['user_id'] == post['user_id'] or session.get('admin') %}
-                        <a href="{{ url_for('delete_post', post_id=post['id']) }}">Delete</a>
-                    {% endif %}
-                </div>
-            </div>
+            <li>
+                <h2>{{ post.user_info.username }}</h2>
+                <p>{{ post.content }}</p>
+                <form action="{{ url_for('upvote', post_id=post._id) }}" method="post">
+                    <button type="submit">Upvote</button>
+                </form>
+                <form action="{{ url_for('downvote', post_id=post._id) }}" method="post">
+                    <button type="submit">Downvote</button>
+                </form>
+                <form action="{{ url_for('delete', post_id=post._id) }}" method="post">
+                    <button type="submit">Delete</button>
+                </form>
+                <form action="{{ url_for('comment', post_id=post._id) }}" method="post">
+                    <input type="text" name="content" placeholder="Add a comment">
+                    <button type="submit">Comment</button>
+                </form>
+                <p>Upvotes: {{ post.upvotes }} | Downvotes: {{ post.downvotes }}</p>
+            </li>
         {% endfor %}
-    </div>
+    </ul>
+{% else %}
+    <p>No posts to show.</p>
+{% endif %}
 {% endblock %}
