@@ -1,19 +1,12 @@
 {% extends "base.html" %}
-
 {% block title %}Login{% endblock %}
-
 {% block content %}
-<section class="form-container">
-    <h2>Log in to MySite</h2>
-    <form method="post">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" required>
-
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required>
-
-        <button type="submit">Login</button>
-    </form>
-    <p>Don't have an account? <a href="{{ url_for('register') }}">Sign up here</a></p>
-</section>
+<h1>Login</h1>
+<form action="{{ url_for('login') }}" method="post">
+    <label for="username">Username:</label>
+    <input type="text" id="username" name="username">
+    <label for="password">Password:</label>
+    <input type="password" id="password" name="password">
+    <button type="submit">Login</button>
+</form>
 {% endblock %}
