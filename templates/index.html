@@ -1,21 +1,34 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
-{% block title %}Home{% endblock %}
+{% block title %}Top Posts{% endblock %}
 
 {% block content %}
-<section class="posts">
-    <h2>Posts</h2>
-    <ul class="post-list">
+    <h2>Top Posts</h2>
+    <div class="post-list">
         {% for post in posts %}
-        <li class="post">
-            <p>{{ post.content }}</p>
-            <div class="post-actions">
-                <a href="{{ url_for('view_post', post_id=post.id) }}" class="btn btn-primary">
-                    <i class="fas fa-eye"></i> View
-                </a>
+            <div class="post">
+                <div class="post-header">
+                    <p class="author">{{ post[1] }}</p>
+                    <div class="votes">
+                        <a href="{{ url_for('vote', post_id=post[0], vote=1) }}" class="upvote {{ 'active' if user_votes.get(post[0]) == 1 else '' }}">
+                            <i class="fas fa-arrow-up"></i>
+                        </a>
+                        <span class="score">{{ post[3] - post[4] }}</span>
+                        <a href="{{ url_for('vote', post_id=post[0], vote=0) }}" class="downvote {{ 'active' if user_votes.get(post[0]) == 0 else '' }}">
+                            <i class="fas fa-arrow-down"></i>
+                        </a>
+                    </div>
+                </div>
+                <div class="post-content">
+                    <p>{{ post[2] }}</p>
+                </div>
+                <div class="post-footer">
+                    <a href="{{ url_for('view_post', post_id=post[0]) }}">Comments</a>
+                    {% if session['user_id'] == post[1] or session.get('admin') %}
+                        <a href="{{ url_for('delete_post', post_id=post[0]) }}">Delete</a>
+                    {% endif %}
+                </div>
             </div>
-        </li>
         {% endfor %}
-    </ul>
-</section>
+    </div>
 {% endblock %}
