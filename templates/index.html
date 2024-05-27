@@ -8,14 +8,14 @@
             <li>
                 <h2>{{ post.user_info.username }}</h2>
                 <p>{{ post.content }}</p>
-                <a href="{{ url_for('view_post', post_id=post._id) }}">View Post</a>
-                <form action="{{ url_for('upvote', post_id=post._id) }}" method="post">
+                <a href="{{ url_for('view_post', post_id=post.id) }}">View Post</a>
+                <form action="{{ url_for('upvote', post_id=post.id) }}" method="post">
                     <button type="submit">Upvote</button>
                 </form>
-                <form action="{{ url_for('downvote', post_id=post._id) }}" method="post">
+                <form action="{{ url_for('downvote', post_id=post.id) }}" method="post">
                     <button type="submit">Downvote</button>
                 </form>
-                <form action="{{ url_for('delete', post_id=post._id) }}" method="post">
+                <form action="{{ url_for('delete', post_id=post.id) }}" method="post">
                     <button type="submit">Delete</button>
                 </form>
                 <p>Upvotes: {{ post.upvotes }} | Downvotes: {{ post.downvotes }}</p>
