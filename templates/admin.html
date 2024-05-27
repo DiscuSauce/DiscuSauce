@@ -1,44 +1,19 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
 {% block title %}Admin Panel{% endblock %}
 
 {% block content %}
-<section>
-    <h2>Users</h2>
-    <table>
-        <tr>
-            <th>Username</th>
-            <th>Actions</th>
-        </tr>
-        {% for user in users %}
-        <tr>
-            <td>{{ user.username }}</td>
-            <td>
-                <a href="{{ url_for('delete_user', user_id=user.id) }}" class="btn btn-danger">
-                    <i class="fas fa-trash-alt"></i> Delete
-                </a>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-</section>
-<section>
-    <h2>Posts</h2>
-    <table>
-        <tr>
-            <th>Content</th>
-            <th>Actions</th>
-        </tr>
-        {% for post in posts %}
-        <tr>
-            <td>{{ post.content }}</td>
-            <td>
-                <a href="{{ url_for('admin_delete_post', post_id=post.id) }}" class="btn btn-danger">
-                    <i class="fas fa-trash-alt"></i> Delete
-                </a>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
-</section>
+<h2>Manage Users</h2>
+<ul>
+    {% for user in users %}
+    <li>{{ user[1] }} - <a href="{{ url_for('delete_user', user_id=user[0]) }}">Delete</a></li>
+    {% endfor %}
+</ul>
+
+<h2>Manage Posts</h2>
+<ul>
+    {% for post in posts %}
+    <li>{{ post[1] }} - <a href="{{ url_for('delete_post', post_id=post[0]) }}">Delete</a></li>
+    {% endfor %}
+</ul>
 {% endblock %}
