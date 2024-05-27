@@ -1,30 +1,36 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
+
 {% block title %}View Post{% endblock %}
+
 {% block content %}
-<h1>{{ post.user_info.username }}'s Post</h1>
-<div class="post">
+<article class="post">
     <p>{{ post.content }}</p>
-    <p>Upvotes: {{ post.upvotes }} | Downvotes: {{ post.downvotes }}</p>
-</div>
-
-{% if comments %}
+    <div class="post-actions">
+        <a href="{{ url_for('vote', post_id=post.id, vote=1) }}" class="btn btn-success">
+            <i class="fas fa-thumbs-up"></i> Upvote ({{ post.upvotes }})
+        </a>
+        <a href="{{ url_for('vote', post_id=post.id, vote=-1) }}" class="btn btn-danger">
+            <i class="fas fa-thumbs-down"></i> Downvote ({{ post.downvotes }})
+        </a>
+    </div>
+</article>
+<section class="comments">
     <h2>Comments</h2>
-    <ul class="comments">
-        {% for comment in comments %}
-            <li>
-                <strong>{{ comment.user_info.username }}</strong>: {{ comment.content }}
-            </li>
-        {% endfor %}
-    </ul>
-{% else %}
-    <p>No comments yet.</p>
-{% endif %}
-
-{% if session.get('username') %}
-    <form action="{{ url_for('comment', post_id=post._id) }}" method="post">
-        <label for="content">Add a comment:</label>
-        <textarea id="content" name="content"></textarea>
-        <button type="submit">Submit</button>
+    <form action="{{ url_for('view_post', post_id=post.id) }}" method="post">
+        <textarea name="comment" rows="4" placeholder="Add a comment"></textarea>
+        <button type="submit" class="btn btn-primary"><i class="fas fa-comment-dots"></i> Comment</button>
     </form>
-{% endif %}
+    {% for comment in comments %}
+    <div class="comment">
+        <p>{{ comment.content }}</p>
+        <div class="comment-actions">
+            {% if comment.user_id == session['user_id'] %}
+            <a href="{{ url_for('delete_comment', comment_id=comment.id) }}" class="btn btn-danger">
+                <i class="fas fa-trash-alt"></i> Delete
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</section>
 {% endblock %}
