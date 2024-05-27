@@ -3,119 +3,49 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
 import html
-import psycopg2
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci')
 
-# PostgreSQL configuration
-POSTGRES_USER = os.getenv('POSTGRES_USER', 'default')
-POSTGRES_PASSWORD = os.getenv('POSTGRES_PASSWORD', '80qhdfubDyWs')
-POSTGRES_HOST = os.getenv('POSTGRES_HOST', 'ep-lucky-breeze-a22r9wts-pooler.eu-central-1.aws.neon.tech')
-POSTGRES_DB = os.getenv('POSTGRES_DB', 'verceldb')
-POSTGRES_PORT = os.getenv('POSTGRES_PORT', '5432')
+# MongoDB configuration
+MONGO_URI = os.getenv('MONGO_URI', 'mongodb+srv://aarondiss:wiDZEYFdCevTXtyA@diss.la46vs4.mongodb.net/?retryWrites=true&w=majority&appName=diss')
+client = MongoClient(MONGO_URI)
+db = client['your_database_name']  # Replace with your database name
 
-def get_db_connection():
+def get_db():
     if 'db' not in g:
-        g.db = psycopg2.connect(
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
-            database=POSTGRES_DB,
-            port=POSTGRES_PORT
-        )
+        g.db = db
     return g.db
-
-def init_db():
-    db = get_db_connection()
-    cursor = db.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username VARCHAR(50) NOT NULL UNIQUE,
-            password VARCHAR(255) NOT NULL
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS posts (
-            id SERIAL PRIMARY KEY,
-            user_id INT NOT NULL,
-            content TEXT NOT NULL,
-            upvotes INT DEFAULT 0,
-            downvotes INT DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS comments (
-            id SERIAL PRIMARY KEY,
-            post_id INT NOT NULL,
-            user_id INT NOT NULL,
-            content TEXT NOT NULL,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS votes (
-            id SERIAL PRIMARY KEY,
-            post_id INT NOT NULL,
-            user_id INT NOT NULL,
-            vote INT NOT NULL,
-            FOREIGN KEY (post_id) REFERENCES posts(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    ''')
-    db.commit()
-    cursor.close()
 
 @app.before_request
 def before_request():
-    g.db = get_db_connection()
-    init_db()
+    g.db = get_db()
 
 @app.teardown_request
 def teardown_request(exception):
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+    g.pop('db', None)
 
 def sanitize_input(input):
     return html.escape(input)
 
 def get_user_id(username):
-    cursor = get_db_connection().cursor()
-    cursor.execute('SELECT id FROM users WHERE username = %s', (username,))
-    user = cursor.fetchone()
-    cursor.close()
-    return user[0] if user else None
+    user = g.db.users.find_one({'username': username})
+    return str(user['_id']) if user else None
 
 def get_user(user_id):
-    cursor = get_db_connection().cursor()
-    cursor.execute('SELECT * FROM users WHERE id = %s', (user_id,))
-    user = cursor.fetchone()
-    cursor.close()
-    return {'id': user[0], 'username': user[1], 'password': user[2]} if user else None
+    user = g.db.users.find_one({'_id': ObjectId(user_id)})
+    return {'id': str(user['_id']), 'username': user['username'], 'password': user['password']} if user else None
 
 def create_user(username, password):
-    db = get_db_connection()
-    cursor = db.cursor()
     hashed_password = generate_password_hash(password)
-    cursor.execute('INSERT INTO users (username, password) VALUES (%s, %s)', (username, hashed_password))
-    db.commit()
-    cursor.execute('SELECT lastval()')
-    user_id = cursor.fetchone()[0]
-    cursor.close()
-    return user_id
+    result = g.db.users.insert_one({'username': username, 'password': hashed_password})
+    return str(result.inserted_id)
 
 def create_post(user_id, content):
-    cursor = g.db.cursor()
-    cursor.execute("INSERT INTO posts (user_id, content) VALUES (%s, %s)", (user_id, content))
-    g.db.commit()
-    cursor.execute('SELECT lastval()')
-    post_id = cursor.fetchone()[0]
-    cursor.close()
-    return post_id
+    result = g.db.posts.insert_one({'user_id': ObjectId(user_id), 'content': content, 'upvotes': 0, 'downvotes': 0})
+    return str(result.inserted_id)
 
 def flash_message(category, message):
     flash(message, category)
@@ -128,13 +58,23 @@ def is_safe_url(target):
 @app.route('/')
 def index():
     if 'username' in session:
-        db = get_db_connection()
-        with db.cursor() as cursor:
-            cursor.execute('SELECT posts.*, users.username FROM posts JOIN users ON posts.user_id = users.id ORDER BY (upvotes - downvotes) DESC')
-            posts = cursor.fetchall()
-            cursor.execute('SELECT post_id, vote FROM votes WHERE user_id = %s', (session['user_id'],))
-            user_votes = {vote['post_id']: vote['vote'] for vote in cursor.fetchall()}
-        db.close()
+        posts = list(g.db.posts.aggregate([
+            {
+                '$lookup': {
+                    'from': 'users',
+                    'localField': 'user_id',
+                    'foreignField': '_id',
+                    'as': 'user'
+                }
+            },
+            {
+                '$unwind': '$user'
+            },
+            {
+                '$sort': {'upvotes': -1, 'downvotes': 1}
+            }
+        ]))
+        user_votes = {vote['post_id']: vote['vote'] for vote in g.db.votes.find({'user_id': ObjectId(session['user_id'])})}
         return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
 
@@ -181,8 +121,6 @@ def profile():
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    db = get_db_connection()
-    cursor = db.cursor()
     if request.method == 'POST':
         new_username = request.form['new_username']
         new_password = request.form['new_password']
@@ -193,7 +131,7 @@ def profile():
             if get_user_id(new_username):
                 flash_message('error', 'Username already exists')
             else:
-                cursor.execute('UPDATE users SET username = %s WHERE id = %s', (new_username, user_id))
+                g.db.users.update_one({'_id': ObjectId(user_id)}, {'$set': {'username': new_username}})
                 session['username'] = new_username
                 flash_message('success', 'Username updated successfully')
         if new_password:
@@ -203,13 +141,10 @@ def profile():
                 flash_message('error', 'Passwords do not match')
             else:
                 hashed_password = generate_password_hash(new_password)
-                cursor.execute('UPDATE users SET password = %s WHERE id = %s', (hashed_password, user_id))
+                g.db.users.update_one({'_id': ObjectId(user_id)}, {'$set': {'password': hashed_password}})
                 flash_message('success', 'Password updated successfully')
-        db.commit()
-    cursor.execute('SELECT username FROM users WHERE id = %s', (user_id,))
-    username = cursor.fetchone()[0]
-    cursor.close()
-    return render_template('profile.html', username=username)
+    user = get_user(user_id)
+    return render_template('profile.html', username=user['username'])
 
 @app.route('/create', methods=['GET', 'POST'])
 def create():
@@ -222,72 +157,58 @@ def create():
         return redirect(url_for('index'))
     return render_template('create.html')
 
-@app.route('/upvote/<int:post_id>', methods=['POST'])
+@app.route('/upvote/<string:post_id>', methods=['POST'])
 def upvote(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    cursor = g.db.cursor()
-    cursor.execute('SELECT * FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
-    vote = cursor.fetchone()
+    vote = g.db.votes.find_one({'post_id': ObjectId(post_id), 'user_id': ObjectId(user_id)})
     if vote:
-        if vote[3] == 1:
-            cursor.execute('DELETE FROM votes WHERE id = %s', (vote[0],))
-            cursor.execute('UPDATE posts SET upvotes = upvotes - 1 WHERE id = %s', (post_id,))
+        if vote['vote'] == 1:
+            g.db.votes.delete_one({'_id': vote['_id']})
+            g.db.posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'upvotes': -1}})
         else:
-            cursor.execute('UPDATE votes SET vote = 1 WHERE id = %s', (vote[0],))
-            cursor.execute('UPDATE posts SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = %s', (post_id,))
+            g.db.votes.update_one({'_id': vote['_id']}, {'$set': {'vote': 1}})
+            g.db.posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'upvotes': 1, 'downvotes': -1}})
     else:
-        cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, 1))
-        cursor.execute('UPDATE posts SET upvotes = upvotes + 1 WHERE id = %s', (post_id,))
-    g.db.commit()
-    cursor.close()
+        g.db.votes.insert_one({'post_id': ObjectId(post_id), 'user_id': ObjectId(user_id), 'vote': 1})
+        g.db.posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'upvotes': 1}})
     return redirect(url_for('index'))
 
-@app.route('/downvote/<int:post_id>', methods=['POST'])
+@app.route('/downvote/<string:post_id>', methods=['POST'])
 def downvote(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    cursor = g.db.cursor()
-    cursor.execute('SELECT * FROM votes WHERE post_id = %s AND user_id = %s', (post_id, user_id))
-    vote = cursor.fetchone()
+    vote = g.db.votes.find_one({'post_id': ObjectId(post_id), 'user_id': ObjectId(user_id)})
     if vote:
-        if vote[3] == -1:
-            cursor.execute('DELETE FROM votes WHERE id = %s', (vote[0],))
-            cursor.execute('UPDATE posts SET downvotes = downvotes - 1 WHERE id = %s', (post_id,))
+        if vote['vote'] == -1:
+            g.db.votes.delete_one({'_id': vote['_id']})
+            g.db.posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'downvotes': -1}})
         else:
-            cursor.execute('UPDATE votes SET vote = -1 WHERE id = %s', (vote[0],))
-            cursor.execute('UPDATE posts SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = %s', (post_id,))
+            g.db.votes.update_one({'_id': vote['_id']}, {'$set': {'vote': -1}})
+            g.db.posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'upvotes': -1, 'downvotes': 1}})
     else:
-        cursor.execute('INSERT INTO votes (post_id, user_id, vote) VALUES (%s, %s, %s)', (post_id, user_id, -1))
-        cursor.execute('UPDATE posts SET downvotes = downvotes + 1 WHERE id = %s', (post_id,))
-    g.db.commit()
-    cursor.close()
+        g.db.votes.insert_one({'post_id': ObjectId(post_id), 'user_id': ObjectId(user_id), 'vote': -1})
+        g.db.posts.update_one({'_id': ObjectId(post_id)}, {'$inc': {'downvotes': 1}})
     return redirect(url_for('index'))
 
-@app.route('/delete/<int:post_id>', methods=['POST'])
+@app.route('/delete/<string:post_id>', methods=['POST'])
 def delete(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    cursor = g.db.cursor()
-    cursor.execute('DELETE FROM comments WHERE post_id = %s', (post_id,))
-    cursor.execute('DELETE FROM votes WHERE post_id = %s', (post_id,))
-    cursor.execute('DELETE FROM posts WHERE id = %s', (post_id,))
-    g.db.commit()
-    cursor.close()
+    g.db.comments.delete_many({'post_id': ObjectId(post_id)})
+    g.db.votes.delete_many({'post_id': ObjectId(post_id)})
+    g.db.posts.delete_one({'_id': ObjectId(post_id)})
     return redirect(url_for('index'))
 
-@app.route('/comment/<int:post_id>', methods=['POST'])
+@app.route('/comment/<string:post_id>', methods=['POST'])
 def comment(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     content = request.form['content']
     content = sanitize_input(content)
-    cursor = g.db.cursor()
-    cursor.execute('INSERT INTO comments (post_id, user_id, content) VALUES (%s, %s, %s)', (post_id, session['user_id'], content))
-    g.db.commit()
-    cursor.close()
+    g.db.comments.insert_one({'post_id': ObjectId(post_id), 'user_id': ObjectId(session['user_id']), 'content': content})
     return redirect(url_for('index'))
 
 @app.route('/logout')
