@@ -192,6 +192,24 @@ def comment(post_id):
     g.db.comments.insert_one({"post_id": ObjectId(post_id), "user_id": ObjectId(session['user_id']), "content": content})
     return redirect(url_for('index'))
 
+@app.route('/post/<post_id>', methods=['GET'])
+def view_post(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    
+    from bson import ObjectId
+    db = get_db_connection()
+    post = db.posts.find_one({'_id': ObjectId(post_id)})
+    comments = list(db.comments.find({'post_id': ObjectId(post_id)}))
+    
+    for comment in comments:
+        comment['user_info'] = db.users.find_one({'_id': ObjectId(comment['user_id'])}, {'username': 1})
+
+    post['user_info'] = db.users.find_one({'_id': ObjectId(post['user_id'])}, {'username': 1})
+    
+    return render_template('view_post.html', post=post, comments=comments)
+
+
 @app.route('/logout')
 def logout():
     session.clear()
