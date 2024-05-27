@@ -1,73 +1,75 @@
-import redis
-import json
-from flask import Flask, render_template, request, redirect, url_for, session, flash
 from werkzeug.security import generate_password_hash, check_password_hash
+from urllib.parse import urlparse, urljoin
+import html
+import os
+import redis
+from flask import Flask, request, session, g, redirect, url_for, flash, render_template
 
 app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
+# Redis configuration
 r = redis.Redis(
   host='redis-16989.c11.us-east-1-2.ec2.redns.redis-cloud.com',
   port=16989,
   password='uo9iVA7KLndbJRy3IK3NcjLWL5eYqcus'
 )
 
-def get_next_id(key):
-    return r.incr(key)
+def init_db():
+    # No explicit schema creation needed for Redis, as it is schemaless
+    pass
 
-def get_user_by_username(username):
-    user_data = r.get(f"user:{username}")
+@app.before_first_request
+def before_first_request():
+    init_db()
+
+@app.before_request
+def before_request():
+    g.db = r
+
+def sanitize_input(input):
+    return html.escape(input)
+
+def get_user_id(username):
+    user_id = g.db.get(f"user:username:{username}")
+    return int(user_id) if user_id else None
+
+def get_user(user_id):
+    user_data = g.db.hgetall(f"user:{user_id}")
     if user_data:
-        return json.loads(user_data)
+        return {k.decode(): v.decode() for k in user_data}
     return None
 
-def get_user_by_id(user_id):
-    user_data = r.get(f"user_id:{user_id}")
-    if user_data:
-        return json.loads(user_data)
-    return None
+def create_user(username, password):
+    user_id = g.db.incr("user:id")
+    hashed_password = generate_password_hash(password)
+    g.db.hmset(f"user:{user_id}", {"username": username, "password": hashed_password})
+    g.db.set(f"user:username:{username}", user_id)
+    return user_id
 
-def save_user(user):
-    r.set(f"user:{user['username']}", json.dumps(user))
-    r.set(f"user_id:{user['id']}", json.dumps(user))
+def create_post(user_id, content):
+    post_id = g.db.incr("post:id")
+    g.db.hmset(f"post:{post_id}", {"user_id": user_id, "content": sanitize_input(content), "upvotes": 0, "downvotes": 0})
+    g.db.lpush(f"user:{user_id}:posts", post_id)
+    return post_id
 
-def get_post_by_id(post_id):
-    post_data = r.get(f"post:{post_id}")
-    if post_data:
-        return json.loads(post_data)
-    return None
+def flash_message(category, message):
+    flash(message, category)
 
-def save_post(post):
-    r.set(f"post:{post['id']}", json.dumps(post))
-    r.lpush("posts", post['id'])
-
-def get_all_posts():
-    post_ids = r.lrange("posts", 0, -1)
-    posts = []
-    for post_id in post_ids:
-        post = get_post_by_id(int(post_id))
-        if post:
-            posts.append(post)
-    return posts
-
-def get_comments_by_post_id(post_id):
-    comment_ids = r.lrange(f"post_comments:{post_id}", 0, -1)
-    comments = []
-    for comment_id in comment_ids:
-        comment_data = r.get(f"comment:{comment_id}")
-        if comment_data:
-            comments.append(json.loads(comment_data))
-    return comments
-
-def save_comment(comment):
-    r.set(f"comment:{comment['id']}", json.dumps(comment))
-    r.lpush(f"post_comments:{comment['post_id']}", comment['id'])
+def is_safe_url(target):
+    ref_url = urlparse(request.host_url)
+    test_url = urlparse(urljoin(request.host_url, target))
+    return test_url.scheme in ('http', 'https') and ref_url.netloc == test_url.netloc
 
 @app.route('/')
 def index():
     if 'username' in session:
-        posts = get_all_posts()
-        return render_template('index.html', username=session['username'], posts=posts)
+        post_ids = g.db.lrange("posts", 0, -1)
+        posts = [g.db.hgetall(f"post:{post_id.decode()}") for post_id in post_ids]
+        for post in posts:
+            post['username'] = g.db.hget(f"user:{post['user_id'].decode()}", "username").decode()
+        user_votes = {int(k.decode()): int(v.decode()) for k, v in g.db.hgetall(f"user:{session['user_id']}:votes").items()}
+        return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -75,13 +77,15 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
-        user = get_user_by_username(username)
-        if user and check_password_hash(user['password'], password):
-            session['username'] = username
-            session['user_id'] = user['id']
-            if username == 'admin':
-                session['admin'] = True
-            return redirect(url_for('index'))
+        user_id = get_user_id(username)
+        if user_id:
+            user = get_user(user_id)
+            if user and check_password_hash(user['password'], password):
+                session['username'] = username
+                session['user_id'] = user_id
+                if username == 'admin':
+                    session['admin'] = True
+                return redirect(url_for('index'))
         flash('Invalid credentials', 'error')
     return render_template('login.html')
 
@@ -91,26 +95,19 @@ def register():
         username = request.form['username']
         password = request.form['password']
         if len(username) < 3:
-            flash('Username must be at least 3 characters long', 'error')
+            flash_message('error', 'Username must be at least 3 characters long')
         elif len(password) < 8:
-            flash('Password must be at least 8 characters long', 'error')
+            flash_message('error', 'Password must be at least 8 characters long')
         else:
-            hashed_password = generate_password_hash(password)
-            user_id = get_next_id("user_id")
-            user = {
-                'id': user_id,
-                'username': username,
-                'password': hashed_password
-            }
-            if get_user_by_username(username) is None:
-                save_user(user)
+            if get_user_id(username):
+                flash_message('error', 'Username already exists')
+            else:
+                user_id = create_user(username, password)
                 session['username'] = username
                 session['user_id'] = user_id
                 if username == 'admin':
                     session['admin'] = True
                 return redirect(url_for('index'))
-            else:
-                flash('Username already exists', 'error')
     return render_template('register.html')
 
 @app.route('/profile', methods=['GET', 'POST'])
@@ -123,27 +120,27 @@ def profile():
         new_password = request.form['new_password']
         confirm_password = request.form['confirm_password']
         if new_username and len(new_username) < 3:
-            flash('Username must be at least 3 characters long', 'error')
+            flash_message('error', 'Username must be at least 3 characters long')
         elif new_username:
-            user = get_user_by_id(user_id)
-            if user:
-                user['username'] = new_username
-                save_user(user)
+            if get_user_id(new_username):
+                flash_message('error', 'Username already exists')
+            else:
+                old_username = session['username']
+                g.db.hset(f"user:{user_id}", "username", new_username)
+                g.db.delete(f"user:username:{old_username}")
+                g.db.set(f"user:username:{new_username}", user_id)
                 session['username'] = new_username
-                flash('Username updated successfully', 'success')
+                flash_message('success', 'Username updated successfully')
         if new_password:
             if len(new_password) < 8:
-                flash('Password must be at least 8 characters long', 'error')
+                flash_message('error', 'Password must be at least 8 characters long')
             elif new_password != confirm_password:
-                flash('Passwords do not match', 'error')
+                flash_message('error', 'Passwords do not match')
             else:
                 hashed_password = generate_password_hash(new_password)
-                user = get_user_by_id(user_id)
-                if user:
-                    user['password'] = hashed_password
-                    save_user(user)
-                    flash('Password updated successfully', 'success')
-    user_posts = [get_post_by_id(int(post_id)) for post_id in r.lrange(f"user_posts:{user_id}", 0, -1)]
+                g.db.hset(f"user:{user_id}", "password", hashed_password)
+                flash_message('success', 'Password updated successfully')
+    user_posts = [g.db.hgetall(f"post:{post_id.decode()}") for post_id in g.db.lrange(f"user:{user_id}:posts", 0, -1)]
     return render_template('profile.html', posts=user_posts)
 
 @app.route('/create_post', methods=['GET', 'POST'])
@@ -153,20 +150,12 @@ def create_post():
     if request.method == 'POST':
         content = request.form['content']
         if len(content.split()) > 64:
-            flash('Post content exceeds 64 words limit', 'error')
+            flash_message('error', 'Post content exceeds 64 words limit')
         else:
             user_id = session['user_id']
-            post_id = get_next_id("post_id")
-            post = {
-                'id': post_id,
-                'user_id': user_id,
-                'content': content,
-                'upvotes': 0,
-                'downvotes': 0
-            }
-            save_post(post)
-            r.lpush(f"user_posts:{user_id}", post_id)
-            flash('Post created successfully', 'success')
+            post_id = create_post(user_id, content)
+            g.db.lpush("posts", post_id)
+            flash_message('success', 'Post created successfully')
             return redirect(url_for('index'))
     return render_template('create_post.html')
 
@@ -175,13 +164,14 @@ def delete_post(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    post = get_post_by_id(post_id)
-    if post and post['user_id'] == user_id:
-        r.delete(f"post:{post_id}")
-        r.lrem("posts", 0, post_id)
-        r.delete(f"user_posts:{user_id}")
-        r.delete(f"post_comments:{post_id}")
-        flash('Post deleted successfully', 'success')
+    post = g.db.hgetall(f"post:{post_id}")
+    if post and int(post['user_id'].decode()) == user_id:
+        g.db.delete(f"post:{post_id}")
+        g.db.lrem(f"user:{user_id}:posts", 0, post_id)
+        g.db.lrem("posts", 0, post_id)
+        flash_message('success', 'Post deleted successfully')
+    else:
+        flash_message('error', 'You are not authorized to delete this post')
     return redirect(url_for('profile'))
 
 @app.route('/vote/<int:post_id>/<int:vote>')
@@ -189,73 +179,33 @@ def vote(post_id, vote):
     if 'username' not in session:
         return redirect(url_for('login'))
     user_id = session['user_id']
-    post = get_post_by_id(post_id)
-    if not post:
-        return redirect(url_for('index'))
-    
-    vote_key = f"vote:{post_id}:{user_id}"
-    current_vote = r.get(vote_key)
-    
-    if current_vote is None:
-        r.set(vote_key, vote)
-        if vote == 1:
-            post['upvotes'] += 1
+    existing_vote = g.db.hget(f"user:{user_id}:votes", post_id)
+    post_key = f"post:{post_id}"
+    if existing_vote:
+        existing_vote = int(existing_vote.decode())
+        if existing_vote == vote:
+            g.db.hdel(f"user:{user_id}:votes", post_id)
+            g.db.hincrby(post_key, 'upvotes' if vote == 1 else 'downvotes', -1)
         else:
-            post['downvotes'] += 1
+            g.db.hset(f"user:{user_id}:votes", post_id, vote)
+            g.db.hincrby(post_key, 'upvotes', 1 if vote == 1 else -1)
+            g.db.hincrby(post_key, 'downvotes', -1 if vote == 1 else 1)
     else:
-        current_vote = int(current_vote)
-        if current_vote == vote:
-            r.delete(vote_key)
-            if vote == 1:
-                post['upvotes'] -= 1
-            else:
-                post['downvotes'] -= 1
-        else:
-            r.set(vote_key, vote)
-            if vote == 1:
-                post['upvotes'] += 1
-                post['downvotes'] -= 1
-            else:
-                post['upvotes'] -= 1
-                post['downvotes'] += 1
-    
-    save_post(post)
+        g.db.hset(f"user:{user_id}:votes", post_id, vote)
+        g.db.hincrby(post_key, 'upvotes' if vote == 1 else 'downvotes', 1)
     return redirect(url_for('index'))
 
-@app.route('/post/<int:post_id>', methods=['GET', 'POST'])
+@app.route('/view_post/<int:post_id>')
 def view_post(post_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    if request.method == 'POST':
-        comment_content = request.form['comment']
-        if comment_content:
-            user_id = session['user_id']
-            comment_id = get_next_id("comment_id")
-            comment = {
-                'id': comment_id,
-                'post_id': post_id,
-                'user_id': user_id,
-                'content': comment_content
-            }
-            save_comment(comment)
-            flash('Comment added successfully', 'success')
-    post = get_post_by_id(post_id)
-    comments = get_comments_by_post_id(post_id)
+    post = g.db.hgetall(f"post:{post_id}")
+    if not post:
+        return 'Post not found', 404
+    post['username'] = g.db.hget(f"user:{post['user_id'].decode()}", "username").decode()
+    comment_ids = g.db.lrange(f"post:{post_id}:comments", 0, -1)
+    comments = [g.db.hgetall(f"comment:{comment_id.decode()}") for comment_id in comment_ids]
+    for comment in comments:
+        comment['username'] = g.db.hget(f"user:{comment['user_id'].decode()}", "username").decode()
     return render_template('view_post.html', post=post, comments=comments)
-
-@app.route('/delete_comment/<int:comment_id>')
-def delete_comment(comment_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    user_id = session['user_id']
-    comment_data = r.get(f"comment:{comment_id}")
-    if comment_data:
-        comment = json.loads(comment_data)
-        if comment['user_id'] == user_id:
-            r.delete(f"comment:{comment_id}")
-            r.lrem(f"post_comments:{comment['post_id']}", 0, comment_id)
-            flash('Comment deleted successfully', 'success')
-    return redirect(url_for('view_post', post_id=comment['post_id']))
 
 @app.route('/logout')
 def logout():
@@ -268,16 +218,11 @@ def logout():
 def create_comment(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    content = request.form['comment']
+    content = sanitize_input(request.form['comment'])
     user_id = session['user_id']
-    comment_id = get_next_id("comment_id")
-    comment = {
-        'id': comment_id,
-        'post_id': post_id,
-        'user_id': user_id,
-        'content': content
-    }
-    save_comment(comment)
+    comment_id = g.db.incr("comment:id")
+    g.db.hmset(f"comment:{comment_id}", {"post_id": post_id, "user_id": user_id, "content": content})
+    g.db.lpush(f"post:{post_id}:comments", comment_id)
     flash('Comment added successfully', 'success')
     return redirect(url_for('view_post', post_id=post_id))
 
@@ -285,33 +230,41 @@ def create_comment(post_id):
 def admin():
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    user_ids = r.keys("user:*")
-    users = [json.loads(r.get(user_id)) for user_id in user_ids if b"user_id:" not in user_id]
-    post_ids = r.lrange("posts", 0, -1)
-    posts = [get_post_by_id(int(post_id)) for post_id in post_ids]
+    user_keys = g.db.keys("user:*")
+    users = [{k.decode(): v.decode() for k, v in g.db.hgetall(user_key).items()} for user_key in user_keys if b':' not in user_key]
+    post_keys = g.db.keys("post:*")
+    posts = [{k.decode(): v.decode() for k, v in g.db.hgetall(post_key).items()} for post_key in post_keys if b':' not in post_key]
     return render_template('admin.html', users=users, posts=posts)
 
 @app.route('/delete_user/<int:user_id>')
 def delete_user(user_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    user = get_user_by_id(user_id)
-    if user:
-        r.delete(f"user:{user['username']}")
-        r.delete(f"user_id:{user_id}")
-        flash('User deleted successfully', 'success')
+    username = g.db.hget(f"user:{user_id}", "username").decode()
+    g.db.delete(f"user:{user_id}")
+    g.db.delete(f"user:username:{username}")
+    user_posts = g.db.lrange(f"user:{user_id}:posts", 0, -1)
+    for post_id in user_posts:
+        g.db.delete(f"post:{post_id.decode()}")
+        g.db.lrem("posts", 0, post_id)
+    g.db.delete(f"user:{user_id}:posts")
+    g.db.delete(f"user:{user_id}:votes")
+    flash('User deleted successfully', 'success')
     return redirect(url_for('admin'))
 
 @app.route('/admin_delete_post/<int:post_id>')
 def admin_delete_post(post_id):
     if 'username' not in session or not session.get('admin'):
         return redirect(url_for('login'))
-    post = get_post_by_id(post_id)
+    post = g.db.hgetall(f"post:{post_id}")
     if post:
-        r.delete(f"post:{post_id}")
-        r.lrem("posts", 0, post_id)
-        flash('Post deleted successfully', 'success')
+        g.db.delete(f"post:{post_id}")
+        g.db.lrem("posts", 0, post_id)
+        user_id = int(post['user_id'].decode())
+        g.db.lrem(f"user:{user_id}:posts", 0, post_id)
+    flash('Post deleted successfully', 'success')
     return redirect(url_for('admin'))
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=True)
