@@ -1,28 +1,21 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
+
 {% block title %}Home{% endblock %}
+
 {% block content %}
-<h1>Welcome, {{ username }}!</h1>
-{% if posts %}
-    <ul class="posts">
+<section class="posts">
+    <h2>Posts</h2>
+    <ul class="post-list">
         {% for post in posts %}
-            <li>
-                <h2>{{ post.user_info.username }}</h2>
-                <p>{{ post.content }}</p>
-                <a href="{{ url_for('view_post', post_id=post.id) }}">View Post</a>
-                <form action="{{ url_for('upvote', post_id=post.id) }}" method="post">
-                    <button type="submit">Upvote</button>
-                </form>
-                <form action="{{ url_for('downvote', post_id=post.id) }}" method="post">
-                    <button type="submit">Downvote</button>
-                </form>
-                <form action="{{ url_for('delete', post_id=post.id) }}" method="post">
-                    <button type="submit">Delete</button>
-                </form>
-                <p>Upvotes: {{ post.upvotes }} | Downvotes: {{ post.downvotes }}</p>
-            </li>
+        <li class="post">
+            <p>{{ post.content }}</p>
+            <div class="post-actions">
+                <a href="{{ url_for('view_post', post_id=post.id) }}" class="btn btn-primary">
+                    <i class="fas fa-eye"></i> View
+                </a>
+            </div>
+        </li>
         {% endfor %}
     </ul>
-{% else %}
-    <p>No posts to show.</p>
-{% endif %}
+</section>
 {% endblock %}
