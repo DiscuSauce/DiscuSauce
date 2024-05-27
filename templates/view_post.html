@@ -1,35 +1,30 @@
 {% extends "base.html" %}
-
 {% block title %}View Post{% endblock %}
-
 {% block content %}
+<h1>{{ post.user_info.username }}'s Post</h1>
 <div class="post">
-    <h3>{{ post['content'] }}</h3>
-    <div class="post-footer">
-        <span class="author">Posted by {{ post['username'] }}</span>
-        <span class="votes">
-            <a href="{{ url_for('vote', post_id=post['id'], vote=1) }}"><i class="fas fa-arrow-up"></i></a>
-            <span>{{ post['upvotes'] - post['downvotes'] }}</span>
-            <a href="{{ url_for('vote', post_id=post['id'], vote=-1) }}"><i class="fas fa-arrow-down"></i></a>
-        </span>
-    </div>
+    <p>{{ post.content }}</p>
+    <p>Upvotes: {{ post.upvotes }} | Downvotes: {{ post.downvotes }}</p>
 </div>
 
-<h3>Comments</h3>
-<ul class="comment-list">
-    {% for comment in comments %}
-    <li class="comment">
-        <p><strong>{{ comment['username'] }}:</strong> {{ comment['content'] }}</p>
-        {% if 'username' in session and session['username'] == comment['username'] %}
-        <a href="{{ url_for('delete_comment', comment_id=comment['id']) }}">Delete</a>
-        {% endif %}
-    </li>
-    {% endfor %}
-</ul>
+{% if comments %}
+    <h2>Comments</h2>
+    <ul class="comments">
+        {% for comment in comments %}
+            <li>
+                <strong>{{ comment.user_info.username }}</strong>: {{ comment.content }}
+            </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p>No comments yet.</p>
+{% endif %}
 
-<form action="{{ url_for('create_comment', post_id=post['id']) }}" method="post">
-    <label for="comment">Add a comment:</label>
-    <textarea id="comment" name="comment" rows="4" required></textarea>
-    <button type="submit">Submit</button>
-</form>
+{% if session.get('username') %}
+    <form action="{{ url_for('comment', post_id=post._id) }}" method="post">
+        <label for="content">Add a comment:</label>
+        <textarea id="content" name="content"></textarea>
+        <button type="submit">Submit</button>
+    </form>
+{% endif %}
 {% endblock %}
