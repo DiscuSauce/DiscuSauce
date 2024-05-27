@@ -1,14 +1,30 @@
-{% extends "base.html" %}
+{% extends 'base.html' %}
+
 {% block title %}Profile{% endblock %}
+
 {% block content %}
-<h1>Profile</h1>
-<form action="{{ url_for('profile') }}" method="post">
-    <label for="new_username">New Username:</label>
-    <input type="text" id="new_username" name="new_username">
-    <label for="new_password">New Password:</label>
-    <input type="password" id="new_password" name="new_password">
-    <label for="confirm_password">Confirm Password:</label>
-    <input type="password" id="confirm_password" name="confirm_password">
-    <button type="submit">Update Profile</button>
-</form>
+<section>
+    <h2>Update Profile</h2>
+    <form action="{{ url_for('profile') }}" method="post">
+        <input type="text" name="new_username" placeholder="New Username">
+        <input type="password" name="new_password" placeholder="New Password">
+        <input type="password" name="confirm_password" placeholder="Confirm Password">
+        <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Save Changes</button>
+    </form>
+</section>
+<section>
+    <h2>Your Posts</h2>
+    <ul class="post-list">
+        {% for post in posts %}
+        <li class="post">
+            <p>{{ post.content }}</p>
+            <div class="post-actions">
+                <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-danger">
+                    <i class="fas fa-trash-alt"></i> Delete
+                </a>
+            </div>
+        </li>
+        {% endfor %}
+    </ul>
+</section>
 {% endblock %}
