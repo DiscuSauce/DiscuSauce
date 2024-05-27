@@ -3,60 +3,67 @@ from flask import Flask, render_template, request, redirect, url_for, session, f
 from werkzeug.security import generate_password_hash, check_password_hash
 from urllib.parse import urlparse, urljoin
 import html
-from pymongo import MongoClient
-from bson.objectid import ObjectId
+import redis
+import json
 
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY', '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci')
 
-# MongoDB configuration
-MONGO_URI = "mongodb+srv://aarondiss:wiDZEYFdCevTXtyA@diss.la46vs4.mongodb.net/?retryWrites=true&w=majority&appName=diss"
-client = MongoClient(MONGO_URI)
-db = client.get_database('diss')
+# Redis configuration
+r = redis.Redis(
+  host='redis-16989.c11.us-east-1-2.ec2.redns.redis-cloud.com',
+  port=16989,
+  password='uo9iVA7KLndbJRy3IK3NcjLWL5eYqcus'
+)
 
-# Utility functions
+@app.before_request
+def before_request():
+    g.redis = r
+
 def sanitize_input(input):
     return html.escape(input)
 
 def get_user_id(username):
-    user = db.users.find_one({"username": username})
-    return user['_id'] if user else None
+    user_data = r.get(f"user:{username}")
+    if user_data:
+        user = json.loads(user_data)
+        return user['id']
+    return None
 
 def get_user(user_id):
-    user = db.users.find_one({"_id": ObjectId(user_id)})
-    return {'id': str(user['_id']), 'username': user['username'], 'password': user['password']} if user else None
+    user_data = r.get(f"user:id:{user_id}")
+    if user_data:
+        user = json.loads(user_data)
+        return user
+    return None
 
 def create_user(username, password):
+    user_id = r.incr("next_user_id")
     hashed_password = generate_password_hash(password)
-    result = db.users.insert_one({"username": username, "password": hashed_password})
-    return str(result.inserted_id)
+    user = {'id': user_id, 'username': username, 'password': hashed_password}
+    r.set(f"user:{username}", json.dumps(user))
+    r.set(f"user:id:{user_id}", json.dumps(user))
+    return user_id
 
 def create_post(user_id, content):
-    result = db.posts.insert_one({"user_id": ObjectId(user_id), "content": content, "upvotes": 0, "downvotes": 0})
-    return str(result.inserted_id)
-
-@app.before_request
-def before_request():
-    g.db = db
+    post_id = r.incr("next_post_id")
+    post = {'id': post_id, 'user_id': user_id, 'content': content, 'upvotes': 0, 'downvotes': 0}
+    r.set(f"post:{post_id}", json.dumps(post))
+    r.lpush("posts", post_id)
+    return post_id
 
 @app.route('/')
 def index():
     if 'username' in session:
-        posts = list(g.db.posts.aggregate([
-            {"$lookup": {
-                "from": "users",
-                "localField": "user_id",
-                "foreignField": "_id",
-                "as": "user_info"
-            }},
-            {"$unwind": "$user_info"},
-            {"$sort": {"upvotes": -1, "downvotes": 1}}
-        ]))
-        for post in posts:
-            post['user_id'] = str(post['user_id'])
-            post['_id'] = str(post['_id'])
-        user_votes = {vote['post_id']: vote['vote'] for vote in g.db.votes.find({"user_id": ObjectId(session['user_id'])})}
-        return render_template('index.html', username=session['username'], posts=posts, user_votes=user_votes)
+        posts = []
+        post_ids = r.lrange("posts", 0, -1)
+        for post_id in post_ids:
+            post_data = r.get(f"post:{post_id.decode('utf-8')}")
+            if post_data:
+                post = json.loads(post_data)
+                post['user_info'] = get_user(post['user_id'])
+                posts.append(post)
+        return render_template('index.html', username=session['username'], posts=posts)
     return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -82,12 +89,12 @@ def register():
         username = request.form['username']
         password = request.form['password']
         if len(username) < 3:
-            flash_message('error', 'Username must be at least 3 characters long')
+            flash('Username must be at least 3 characters long', 'error')
         elif len(password) < 8:
-            flash_message('error', 'Password must be at least 8 characters long')
+            flash('Password must be at least 8 characters long', 'error')
         else:
             if get_user_id(username):
-                flash_message('error', 'Username already exists')
+                flash('Username already exists', 'error')
             else:
                 user_id = create_user(username, password)
                 session['username'] = username
@@ -107,23 +114,29 @@ def profile():
         new_password = request.form['new_password']
         confirm_password = request.form['confirm_password']
         if new_username and len(new_username) < 3:
-            flash_message('error', 'Username must be at least 3 characters long')
+            flash('Username must be at least 3 characters long', 'error')
         elif new_username:
             if get_user_id(new_username):
-                flash_message('error', 'Username already exists')
+                flash('Username already exists', 'error')
             else:
-                g.db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"username": new_username}})
+                user = get_user(user_id)
+                r.delete(f"user:{user['username']}")
+                user['username'] = new_username
                 session['username'] = new_username
-                flash_message('success', 'Username updated successfully')
+                r.set(f"user:{new_username}", json.dumps(user))
+                r.set(f"user:id:{user_id}", json.dumps(user))
+                flash('Username updated successfully', 'success')
         if new_password:
             if len(new_password) < 8:
-                flash_message('error', 'Password must be at least 8 characters long')
+                flash('Password must be at least 8 characters long', 'error')
             elif new_password != confirm_password:
-                flash_message('error', 'Passwords do not match')
+                flash('Passwords do not match', 'error')
             else:
-                hashed_password = generate_password_hash(new_password)
-                g.db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"password": hashed_password}})
-                flash_message('success', 'Password updated successfully')
+                user = get_user(user_id)
+                user['password'] = generate_password_hash(new_password)
+                r.set(f"user:{user['username']}", json.dumps(user))
+                r.set(f"user:id:{user_id}", json.dumps(user))
+                flash('Password updated successfully', 'success')
     user = get_user(user_id)
     return render_template('profile.html', username=user['username'])
 
@@ -138,77 +151,67 @@ def create():
         return redirect(url_for('index'))
     return render_template('create.html')
 
-@app.route('/upvote/<post_id>', methods=['POST'])
+@app.route('/post/<int:post_id>', methods=['GET'])
+def view_post(post_id):
+    if 'username' not in session:
+        return redirect(url_for('login'))
+    post_data = r.get(f"post:{post_id}")
+    if post_data:
+        post = json.loads(post_data)
+        post['user_info'] = get_user(post['user_id'])
+        comments = []
+        comment_ids = r.lrange(f"comments:{post_id}", 0, -1)
+        for comment_id in comment_ids:
+            comment_data = r.get(f"comment:{comment_id.decode('utf-8')}")
+            if comment_data:
+                comment = json.loads(comment_data)
+                comment['user_info'] = get_user(comment['user_id'])
+                comments.append(comment)
+        return render_template('view_post.html', post=post, comments=comments)
+    return redirect(url_for('index'))
+
+@app.route('/upvote/<int:post_id>', methods=['POST'])
 def upvote(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_id = session['user_id']
-    vote = g.db.votes.find_one({"post_id": ObjectId(post_id), "user_id": ObjectId(user_id)})
-    if vote:
-        if vote['vote'] == 1:
-            g.db.votes.delete_one({"_id": vote['_id']})
-            g.db.posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"upvotes": -1}})
-        else:
-            g.db.votes.update_one({"_id": vote['_id']}, {"$set": {"vote": 1}})
-            g.db.posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"upvotes": 1, "downvotes": -1}})
-    else:
-        g.db.votes.insert_one({"post_id": ObjectId(post_id), "user_id": ObjectId(user_id), "vote": 1})
-        g.db.posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"upvotes": 1}})
+    post_data = r.get(f"post:{post_id}")
+    if post_data:
+        post = json.loads(post_data)
+        post['upvotes'] += 1
+        r.set(f"post:{post_id}", json.dumps(post))
     return redirect(url_for('index'))
 
-@app.route('/downvote/<post_id>', methods=['POST'])
+@app.route('/downvote/<int:post_id>', methods=['POST'])
 def downvote(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    user_id = session['user_id']
-    vote = g.db.votes.find_one({"post_id": ObjectId(post_id), "user_id": ObjectId(user_id)})
-    if vote:
-        if vote['vote'] == -1:
-            g.db.votes.delete_one({"_id": vote['_id']})
-            g.db.posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"downvotes": -1}})
-        else:
-            g.db.votes.update_one({"_id": vote['_id']}, {"$set": {"vote": -1}})
-            g.db.posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"upvotes": -1, "downvotes": 1}})
-    else:
-        g.db.votes.insert_one({"post_id": ObjectId(post_id), "user_id": ObjectId(user_id), "vote": -1})
-        g.db.posts.update_one({"_id": ObjectId(post_id)}, {"$inc": {"downvotes": 1}})
+    post_data = r.get(f"post:{post_id}")
+    if post_data:
+        post = json.loads(post_data)
+        post['downvotes'] += 1
+        r.set(f"post:{post_id}", json.dumps(post))
     return redirect(url_for('index'))
 
-@app.route('/delete/<post_id>', methods=['POST'])
+@app.route('/delete/<int:post_id>', methods=['POST'])
 def delete(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
-    g.db.comments.delete_many({"post_id": ObjectId(post_id)})
-    g.db.votes.delete_many({"post_id": ObjectId(post_id)})
-    g.db.posts.delete_one({"_id": ObjectId(post_id)})
+    r.delete(f"post:{post_id}")
+    r.lrem("posts", 0, post_id)
+    r.delete(f"comments:{post_id}")
     return redirect(url_for('index'))
 
-@app.route('/comment/<post_id>', methods=['POST'])
+@app.route('/comment/<int:post_id>', methods=['POST'])
 def comment(post_id):
     if 'username' not in session:
         return redirect(url_for('login'))
     content = request.form['content']
     content = sanitize_input(content)
-    g.db.comments.insert_one({"post_id": ObjectId(post_id), "user_id": ObjectId(session['user_id']), "content": content})
-    return redirect(url_for('index'))
-
-@app.route('/post/<post_id>', methods=['GET'])
-def view_post(post_id):
-    if 'username' not in session:
-        return redirect(url_for('login'))
-    
-    from bson import ObjectId
-    db = get_db_connection()
-    post = db.posts.find_one({'_id': ObjectId(post_id)})
-    comments = list(db.comments.find({'post_id': ObjectId(post_id)}))
-    
-    for comment in comments:
-        comment['user_info'] = db.users.find_one({'_id': ObjectId(comment['user_id'])}, {'username': 1})
-
-    post['user_info'] = db.users.find_one({'_id': ObjectId(post['user_id'])}, {'username': 1})
-    
-    return render_template('view_post.html', post=post, comments=comments)
-
+    comment_id = r.incr("next_comment_id")
+    comment = {'id': comment_id, 'post_id': post_id, 'user_id': session['user_id'], 'content': content}
+    r.set(f"comment:{comment_id}", json.dumps(comment))
+    r.lpush(f"comments:{post_id}", comment_id)
+    return redirect(url_for('view_post', post_id=post_id))
 
 @app.route('/logout')
 def logout():
