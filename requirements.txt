@@ -1,4 +1,4 @@
 Flask
-pymongo
-Werkzeug
+Werkzeu
+redis
 gunicorn
