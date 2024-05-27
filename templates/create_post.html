@@ -1,10 +1,11 @@
-{% extends 'base.html' %}
+{% extends "base.html" %}
 
 {% block title %}Create Post{% endblock %}
 
 {% block content %}
-<form action="{{ url_for('create_post') }}" method="post">
-    <textarea name="content" rows="4" placeholder="Write your post here"></textarea>
-    <button type="submit" class="btn btn-primary"><i class="fas fa-paper-plane"></i> Post</button>
+<h2>Create a New Post</h2>
+<form method="post">
+    <textarea name="content" rows="5" placeholder="Write your post here..."></textarea>
+    <button type="submit">Post</button>
 </form>
 {% endblock %}
