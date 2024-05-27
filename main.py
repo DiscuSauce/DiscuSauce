@@ -8,9 +8,9 @@ app = Flask(__name__)
 app.secret_key = '$E5Q!8snLRG!8^$Old*a#A1RMhgaUp@r0dv2lOb5ecGrS&0Fci'
 
 # Configuration for Redis
-redis_host = 'eu1-secure-albacore-38686.upstash.io'
-redis_port = 38686
-redis_password = '61ec78bf004a425a8eeb3555735646d7'
+redis_host = 'redis-16989.c11.us-east-1-2.ec2.redns.redis-cloud.com'
+redis_port = 16989
+redis_password = 'uo9iVA7KLndbJRy3IK3NcjLWL5eYqcus'
 
 # Create Redis connection
 try:
