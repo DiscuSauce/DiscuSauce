@@ -1,197 +1,65 @@
-body, h1, h2, p, ul, ol, li, form, label, input, textarea, button {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
 body {
-    font-family: 'Arial', sans-serif;
-    background-color: #0d1117;
-    color: #c9d1d9;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f0f0f0;
+    margin: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
 }
 
 .container {
-    max-width: 800px;
-    margin: 20px auto;
-    padding: 20px;
-    background: #0d1117;
-    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
+    max-width: 900px;
+    width: 100%;
 }
 
-nav ul {
+.card {
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+#chat-box {
+    height: 500px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+#messages {
     list-style-type: none;
     padding: 0;
     margin: 0;
-    text-align: center;
+    flex-grow: 1;
+    overflow-y: auto;
 }
 
-nav ul li {
-    display: inline;
-}
-
-nav ul li a {
-    text-decoration: none;
-    color: #c9d1d9;
-    padding: 10px 15px;
-    display: inline-block;
-}
-
-nav ul li a:hover {
-    background-color: #161b22;
-    color: #c9d1d9;
-    border-radius: 5px;
-}
-
-nav ul li span {
-    margin-left: 20px;
-    font-weight: bold;
-}
-
-.flashes {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.flashes li {
-    padding: 10px;
+.message {
     margin-bottom: 10px;
-    border-radius: 5px;
-}
-
-.flashes .success {
-    background-color: #28a745;
-    color: #ffffff;
-}
-
-.flashes .error {
-    background-color: #d73a49;
-    color: #ffffff;
-}
-
-.post-list, .comment-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.post, .comment {
-    padding: 15px;
-    margin-bottom: 15px;
-    border: 1px solid #30363d;
-    border-radius: 5px;
-    background-color: #161b22;
-}
-
-.post .votes, .comment .votes {
+    padding: 10px;
+    border-radius: 8px;
     display: flex;
-    align-items: center;
+    flex-direction: column;
 }
 
-.votes a {
-    color: #c9d1d9;
-    margin-right: 10px;
-    text-decoration: none;
+.my-message {
+    align-self: flex-end;
 }
 
-.votes .upvote.active {
-    color: #28a745;
+.other-message {
+    align-self: flex-start;
 }
 
-.votes .downvote.active {
-    color: #d73a49;
-}
-
-.post .votes span {
-    color: #c9d1d9;
-    margin-right: 10px;
-}
-
-form {
-    margin-bottom: 20px;
-}
-
-form label {
-    display: block;
+.sender {
+    font-weight: bold;
     margin-bottom: 5px;
 }
 
-form input[type="text"],
-form input[type="password"],
-form textarea {
-    padding: 10px;
-    margin-bottom: 10px;
-    border: 1px solid #30363d;
-    border-radius: 5px;
-    width: 100%;
-    background-color: #0d1117;
-    color: #c9d1d9;
+.time {
+    color: #888;
+    font-size: 0.8em;
+    align-self: flex-end;
 }
 
-form button {
-    padding: 10px;
-    border: none;
-    border-radius: 5px;
-    background-color: #24292e;
-    color: #c9d1d9;
-    cursor: pointer;
-}
-
-form button:hover {
-    background-color: #30363d;
-}
-
-.password-container {
-    display: flex;
-    align-items: center;
-}
-
-.password-container input {
-    flex: 1;
-}
-
-.password-container i {
-    cursor: pointer;
-    margin-left: -30px;
-}
-
-/* Custom styles */
-.navbar {
-    background-color: #0d1117;
-    padding: 10px;
-    text-align: center;
-}
-
-.navbar ul {
-    list-style-type: none;
+.text {
     margin: 0;
-    padding: 0;
-}
-
-.navbar ul li {
-    display: inline;
-    margin-right: 10px;
-}
-
-.navbar ul li a {
-    text-decoration: none;
-    color: #c9d1d9;
-    padding: 5px 10px;
-    border-radius: 5px;
-}
-
-.navbar ul li a:hover {
-    background-color: #161b22;
-}
-
-.comment p {
-    word-break: break-all;
-    overflow-wrap: break-word;
-    word-wrap: break-word;
-    hyphens: auto;
-}
-
-.post h3, .post p {
-    overflow-wrap: break-word;
 }
